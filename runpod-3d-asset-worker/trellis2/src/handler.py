@@ -22,6 +22,8 @@ logging.basicConfig(
 LOGGER = logging.getLogger(__name__)
 
 MODEL_ID = os.environ.get("MODEL_ID", "microsoft/TRELLIS.2-4B")
+MODEL_BASE = os.environ.get("MODEL_BASE", "/runpod-volume")
+MODEL_PATH = os.path.join(MODEL_BASE, "trellis2-4b")  # populated by scripts/download_model.py
 
 R2_ACCOUNT_ID        = os.environ["R2_ACCOUNT_ID"]
 R2_ACCESS_KEY_ID     = os.environ["R2_ACCESS_KEY_ID"]
@@ -92,9 +94,14 @@ def get_pipeline():
     if _pipeline is None:
         from trellis2.pipelines import Trellis2ImageTo3DPipeline
 
-        LOGGER.info("Loading Trellis2ImageTo3DPipeline from %s", MODEL_ID)
+        # Prefer the volume-cached checkpoint (scripts/download_model.py) —
+        # falls back to a live HF pull only if the volume wasn't pre-warmed,
+        # which works but adds ~15GB to this cold start.
+        local_ready = Path(MODEL_PATH).exists() and any(os.scandir(MODEL_PATH))
+        source = MODEL_PATH if local_ready else MODEL_ID
+        LOGGER.info("Loading Trellis2ImageTo3DPipeline from %s", source)
         t0 = time.time()
-        _pipeline = Trellis2ImageTo3DPipeline.from_pretrained(MODEL_ID)
+        _pipeline = Trellis2ImageTo3DPipeline.from_pretrained(source)
         _pipeline.cuda()
         LOGGER.info("Pipeline ready in %.1fs", time.time() - t0)
     return _pipeline

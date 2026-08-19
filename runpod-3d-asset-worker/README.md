@@ -58,9 +58,9 @@ vocabulary for the fleet to operate.
 |---|---|---|
 | Both images | A40 / A6000 / A100, 48GB+ | TRELLIS.2 needs ≥24GB; Hunyuan3D combined shape+texture needs ~29GB — same class already used elsewhere leaves headroom on both |
 
-Suggested volumes (network volume, HF cache lives at `/runpod-volume/hf-cache`):
-- `trellis2-4b-a40` — caches the TRELLIS.2-4B checkpoint
-- `hunyuan3d-2-1-a40` — caches the Hunyuan3D-Shape-2.1 + Hunyuan3D-Paint-2.1 checkpoints (larger — texture model included)
+Suggested volumes (network volume, mounted at `/runpod-volume` on the serverless worker):
+- `trellis2-4b-a40` — the ~15GB TRELLIS.2-4B checkpoint at `trellis2-4b/`. Pre-warm it once by attaching the volume to a RunPod Pod (mounts at `/workspace` there) and running [`trellis2/scripts/download_model.py`](trellis2/scripts/download_model.py) — `handler.py` prefers this over a live Hugging Face pull automatically, and falls back to one only if the volume wasn't pre-warmed.
+- `hunyuan3d-2-1-a40` — caches the Hunyuan3D-Shape-2.1 + Hunyuan3D-Paint-2.1 checkpoints (larger — texture model included). No equivalent pre-warm script yet — `handler.py` still relies on `HF_HOME` caching there.
 
 ## Scope: generation only, not normalization
 
