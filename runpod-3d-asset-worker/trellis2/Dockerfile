@@ -45,9 +45,17 @@ RUN git clone --recursive https://github.com/microsoft/TRELLIS.2.git /app/TRELLI
 WORKDIR /app/TRELLIS.2
 
 # ---- setup.sh --basic, without conda ----
+# plyfile isn't in upstream's --basic list but IS a real runtime dependency
+# of at least one SC-VAE model class (SparseUnetVaeDecoder /
+# FlexiDualGridVaeDecoder) -- without it, base.py's from_pretrained()
+# catches the resulting ModuleNotFoundError in a bare `except Exception`
+# and silently falls back to a code path with its own bug (an unqualified
+# model path gets mis-split into a bogus HF repo_id). Confirmed against a
+# live crash log + the actual base.py/models/__init__.py source.
 RUN pip install --no-cache-dir \
         imageio imageio-ffmpeg tqdm easydict opencv-python-headless ninja \
         trimesh transformers tensorboard pandas lpips zstandard kornia timm \
+        plyfile \
     && pip install --no-cache-dir \
         "git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8" \
     && pip install --no-cache-dir pillow-simd
