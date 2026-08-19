@@ -9,9 +9,9 @@ FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    HF_HOME=/runpod-volume/hf-cache \
-    TRANSFORMERS_CACHE=/runpod-volume/hf-cache \
-    MODEL_BASE=/runpod-volume \
+    HF_HOME=/workspace/hf-cache \
+    TRANSFORMERS_CACHE=/workspace/hf-cache \
+    MODEL_BASE=/workspace \
     CUDA_HOME=/usr/local/cuda \
     TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0" \
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \

@@ -3,11 +3,14 @@
 so the serverless worker doesn't eat that download on every cold start.
 
 Run this from a RunPod Pod (not the serverless worker itself) with the same
-network volume attached that the `3d-asset-trellis2` endpoint uses — RunPod
-mounts network volumes at /workspace on Pods and /runpod-volume on
-Serverless workers, so a download to /workspace/trellis2-4b here shows up
-at /runpod-volume/trellis2-4b for the worker. Matches the pattern already
-used for the Qwen workers (qwen-image-gen/scripts/download_models.py).
+network volume attached that the `3d-asset-trellis2` endpoint uses — this
+account's volumes mount at /workspace on both Pods and Serverless workers.
+Must land under /workspace/models/Trellis2 specifically (see MODEL_PATH in
+../src/handler.py) — anywhere else on a Pod (e.g. the default HF cache
+under $HOME) is the pod's local container disk, not the network volume,
+and gets thrown away when the pod is stopped.
+Matches the pattern already used for the Qwen workers
+(qwen-image-gen/scripts/download_models.py).
 
     pip install -q huggingface_hub
     python download_model.py
@@ -22,7 +25,7 @@ subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "huggingfac
 from huggingface_hub import snapshot_download
 
 REPO_ID = "microsoft/TRELLIS.2-4B"
-LOCAL_DIR = os.environ.get("TRELLIS2_LOCAL_DIR", "/workspace/trellis2-4b")
+LOCAL_DIR = os.environ.get("TRELLIS2_LOCAL_DIR", "/workspace/models/Trellis2")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
 # The repo is just ckpts/*.safetensors + *.json — no flax/tf/rust duplicates

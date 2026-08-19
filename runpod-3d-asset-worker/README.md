@@ -56,10 +56,11 @@ vocabulary for the fleet to operate.
 
 | | GPU | Why |
 |---|---|---|
-| Both images | A40 / A6000 / A100, 48GB+ | TRELLIS.2 needs ≥24GB; Hunyuan3D combined shape+texture needs ~29GB — same class already used elsewhere leaves headroom on both |
+| trellis2 | **L40S, 48GB** (~$0.86/hr) | TRELLIS.2 needs ≥24GB; L40S clears that with 2x headroom for cheaper than A40/A6000 (~$1.22/hr) for the same 48GB, and it's the same GPU class already picked for `runpod-3d-render-worker` — one GPU class across the whole 3D pipeline instead of two. Already covered by the Dockerfile's `TORCH_CUDA_ARCH_LIST` (includes `8.9`/Ada). Step up to A100/H100 only if the Phase 0 bake-off shows `quality: "high"` needs it. |
+| hunyuan3d | A40 / A6000 / A100, 48GB+ | Combined shape+texture needs ~29GB — same class already used elsewhere leaves headroom |
 
-Suggested volumes (network volume, mounted at `/runpod-volume` on the serverless worker):
-- `trellis2-4b-a40` — the ~15GB TRELLIS.2-4B checkpoint at `trellis2-4b/`. Pre-warm it once by attaching the volume to a RunPod Pod (mounts at `/workspace` there) and running [`trellis2/scripts/download_model.py`](trellis2/scripts/download_model.py) — `handler.py` prefers this over a live Hugging Face pull automatically, and falls back to one only if the volume wasn't pre-warmed.
+Suggested volumes (network volume, mounted at `/workspace` on both Pods and Serverless workers on this account):
+- `trellis2-4b-a40` — the ~15GB TRELLIS.2-4B checkpoint, must land at `/workspace/models/Trellis2` specifically (that's the persistent network volume mount; anywhere else on a Pod is local container disk and gets thrown away). Pre-warm it once by attaching the volume to a RunPod Pod and running [`trellis2/scripts/download_model.py`](trellis2/scripts/download_model.py) — `handler.py` prefers this over a live Hugging Face pull automatically, and falls back to one only if the volume wasn't pre-warmed.
 - `hunyuan3d-2-1-a40` — caches the Hunyuan3D-Shape-2.1 + Hunyuan3D-Paint-2.1 checkpoints (larger — texture model included). No equivalent pre-warm script yet — `handler.py` still relies on `HF_HOME` caching there.
 
 ## Scope: generation only, not normalization

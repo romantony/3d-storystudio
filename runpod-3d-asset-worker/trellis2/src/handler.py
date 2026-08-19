@@ -22,8 +22,8 @@ logging.basicConfig(
 LOGGER = logging.getLogger(__name__)
 
 MODEL_ID = os.environ.get("MODEL_ID", "microsoft/TRELLIS.2-4B")
-MODEL_BASE = os.environ.get("MODEL_BASE", "/runpod-volume")
-MODEL_PATH = os.path.join(MODEL_BASE, "trellis2-4b")  # populated by scripts/download_model.py
+MODEL_BASE = os.environ.get("MODEL_BASE", "/workspace")
+MODEL_PATH = os.path.join(MODEL_BASE, "models", "Trellis2")  # populated by scripts/download_model.py
 
 R2_ACCOUNT_ID        = os.environ["R2_ACCOUNT_ID"]
 R2_ACCESS_KEY_ID     = os.environ["R2_ACCESS_KEY_ID"]

@@ -21,9 +21,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/usr/local/cuda/bin:${PATH} \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
     TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0" \
-    HF_HOME=/runpod-volume/hf-cache \
-    TRANSFORMERS_CACHE=/runpod-volume/hf-cache \
-    MODEL_BASE=/runpod-volume
+    HF_HOME=/workspace/hf-cache \
+    TRANSFORMERS_CACHE=/workspace/hf-cache \
+    MODEL_BASE=/workspace
 
 WORKDIR /workspace
 
