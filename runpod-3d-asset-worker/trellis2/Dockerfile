@@ -82,6 +82,11 @@ RUN pip install --no-cache-dir --no-build-isolation ./o-voxel
 # Worker glue — not part of upstream TRELLIS.2.
 RUN pip install --no-cache-dir runpod boto3 Pillow numpy
 
-COPY src/handler.py /app/handler.py
+# handler.py must live inside the repo dir, not /app: `from trellis2.pipelines
+# import ...` only resolves because the `trellis2` package sits next to
+# whatever script Python was invoked on — sys.path[0] is the *script's own*
+# directory, not the process cwd. Confirmed by actually running the built
+# image; a sibling /app/handler.py fails with ModuleNotFoundError.
+COPY src/handler.py /app/TRELLIS.2/handler.py
 
-CMD ["python3", "-u", "/app/handler.py"]
+CMD ["python3", "-u", "handler.py"]
