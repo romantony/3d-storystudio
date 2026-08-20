@@ -1,0 +1,97 @@
+name: Build 3D Asset Worker (Hunyuan3D 2.1)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "runpod-3d-asset-worker/hunyuan3d/**"
+      - ".github/workflows/asset-hunyuan3d-dockerhub.yml"
+  pull_request:
+    paths:
+      - "runpod-3d-asset-worker/hunyuan3d/**"
+      - ".github/workflows/asset-hunyuan3d-dockerhub.yml"
+  workflow_dispatch:
+    inputs:
+      push_image:
+        description: "Push image to Docker Hub"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: romantony/3d-asset-hunyuan3d
+  IMAGE_CONTEXT: runpod-3d-asset-worker/hunyuan3d
+  IMAGE_DOCKERFILE: runpod-3d-asset-worker/hunyuan3d/Dockerfile
+
+jobs:
+  build:
+    name: Build and push image
+    runs-on: ubuntu-22.04
+    # Conda toolchain + custom_rasterizer/DifferentiableRenderer CUDA compiles
+    # from source, mirroring upstream's own Dockerfile — same class of build
+    # time as the trellis2 image, budget accordingly.
+    timeout-minutes: 180
+
+    steps:
+      - name: Free up disk space
+        run: |
+          echo "Before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af
+          echo "After cleanup:"
+          df -h
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Generate image tags
+        id: meta
+        shell: bash
+        run: |
+          short_sha="${GITHUB_SHA::12}"
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            tags="${{ env.IMAGE_NAME }}:pr-${{ github.event.pull_request.number }}-${short_sha}"
+          else
+            tags="${{ env.IMAGE_NAME }}:sha-${short_sha}"
+            if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+              tags="${tags},${{ env.IMAGE_NAME }}:latest"
+            else
+              safe_ref="$(printf '%s' "${GITHUB_REF_NAME}" | tr '/:@' '---')"
+              tags="${tags},${{ env.IMAGE_NAME }}:${safe_ref}"
+            fi
+          fi
+          echo "tags=${tags}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.IMAGE_CONTEXT }}
+          file: ${{ env.IMAGE_DOCKERFILE }}
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push_image) }}
+          tags: ${{ steps.meta.outputs.tags }}
+          provenance: false
+          cache-from: type=gha,scope=3d-asset-hunyuan3d
+          cache-to: type=gha,mode=max,scope=3d-asset-hunyuan3d
+
+      - name: Print image tags
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "Built image tags: ${{ steps.meta.outputs.tags }}"
