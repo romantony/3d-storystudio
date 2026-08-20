@@ -14,6 +14,7 @@ __pycache__/
 *.glb
 *.usda
 fixtures/3d/golden-scene/renders/
+fixtures/3d/pipeline-smoke-test/last_run_results.json
 
 # Golden scene fixture GLBs are the fixture, not scratch -- override the
 # blanket *.glb rule above so they actually get committed.
