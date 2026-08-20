@@ -149,7 +149,13 @@ def poll_until_done(job_id):
 
 
 def check_output_nonempty(url):
-    req = urllib.request.Request(url, method="HEAD")
+    # R2's Cloudflare front blocks urllib's default User-Agent with a
+    # bare 403 -- same reason the worker handlers' own download_to()/
+    # load_image() set a custom UA. Without this every check silently
+    # reads as "empty" (HTTPError is-a URLError) even though the file is
+    # actually there -- confirmed via curl vs. bare urllib on a real
+    # render output.
+    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "python-golden-scene-check/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             length = int(resp.headers.get("Content-Length", "0"))
