@@ -75,7 +75,12 @@ RUN pip install --no-cache-dir \
 # MAX_JOBS caps ninja's parallel nvcc compiles — flash-attn's default
 # parallelism wants ~2GB RAM per job and will OOM-kill the build on
 # constrained CI/build hosts otherwise; trades build time for reliability.
-RUN pip install --no-cache-dir flash-attn==2.7.3
+# --no-build-isolation: flash-attn's setup.py does `import torch` at build
+# time to detect the CUDA/ABI to compile against. Default pip build
+# isolation builds in a fresh env that can't see the torch already
+# installed above, so the build fails with ModuleNotFoundError: no module
+# named 'torch' even though torch is installed in the image.
+RUN pip install --no-cache-dir --no-build-isolation flash-attn==2.7.3
 
 # ---- setup.sh --nvdiffrast ----
 RUN git clone -b v0.4.0 https://github.com/NVlabs/nvdiffrast.git /tmp/ext/nvdiffrast \
