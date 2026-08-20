@@ -1,0 +1,13 @@
+{
+  "shotId": "shot_golden_01_establishing",
+  "preset": "extreme_wide_establishing",
+  "camera": {
+    "focalLengthMm": 24,
+    "translation": [4.5, -4.5, 2.4],
+    "lookAt": {"_worldPosition": [0, 0, 0.3]}
+  },
+  "passes": ["rgb", "depth", "normal", "object_id", "alpha"],
+  "resolution": {"width": 960, "height": 540},
+  "rendererEngine": "CYCLES",
+  "samples": 32
+}

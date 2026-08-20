@@ -1,0 +1,14 @@
+{
+  "shotId": "shot_golden_04_closeup",
+  "preset": "close_up",
+  "camera": {
+    "focalLengthMm": 85,
+    "translation": [1.5, 0.5, 0.55],
+    "lookAt": {"_worldPosition": [0.8, 0.8, 0.5]},
+    "dof": {"enabled": true, "focusDistanceM": 0.76}
+  },
+  "passes": ["rgb", "depth", "normal", "object_id", "alpha"],
+  "resolution": {"width": 960, "height": 540},
+  "rendererEngine": "CYCLES",
+  "samples": 32
+}

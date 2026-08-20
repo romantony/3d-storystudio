@@ -14,3 +14,7 @@ __pycache__/
 *.glb
 *.usda
 fixtures/3d/golden-scene/renders/
+
+# Golden scene fixture GLBs are the fixture, not scratch -- override the
+# blanket *.glb rule above so they actually get committed.
+!fixtures/3d/golden-scene/assets/*.glb

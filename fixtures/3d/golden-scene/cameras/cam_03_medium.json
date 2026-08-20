@@ -1,0 +1,13 @@
+{
+  "shotId": "shot_golden_03_medium",
+  "preset": "medium",
+  "camera": {
+    "focalLengthMm": 50,
+    "translation": [1.9, -2.0, 1.1],
+    "lookAt": {"_worldPosition": [0.2, 0.2, 0.3]}
+  },
+  "passes": ["rgb", "depth", "normal", "object_id", "alpha"],
+  "resolution": {"width": 960, "height": 540},
+  "rendererEngine": "CYCLES",
+  "samples": 32
+}

@@ -94,7 +94,10 @@ images (mostly a Blender tarball download).
 ## Golden test scene
 
 Phase 0 exit criteria calls for a fixture scene (5–10 objects, 6 cameras)
-rendered from every camera with zero asset regeneration — not included in
-this commit. Build it as `fixtures/3d/golden-scene/` (scene.json + 6×
-camera.json + a handful of CC0 GLBs) and use it as the regression check for
-this worker before wiring up the Convex/Step Functions layer around it.
+rendered from every camera with zero asset regeneration. Built at
+[`fixtures/3d/golden-scene/`](../fixtures/3d/golden-scene/) — 9 nodes
+(ground + 8 procedural props), 6 camera presets, and a driver script
+(`run_golden_scene.py`) that uploads the assets once and asserts every
+pass comes back non-empty across all 6 shots. Run it as the regression
+check for this worker before wiring up the Convex/Step Functions layer
+around it.

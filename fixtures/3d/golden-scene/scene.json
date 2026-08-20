@@ -1,0 +1,91 @@
+{
+  "sceneId": "scn_golden_01",
+  "revision": 1,
+  "projectId": "fixtures",
+  "units": "meter",
+  "upAxis": "Z",
+  "_comment": "Phase 0 golden test scene (spec Appendix B / implementation plan P0). glbFile is a fixture-local path, not part of the render worker's wire contract -- run_golden_scene.py uploads assets/*.glb and substitutes assetUrl before POSTing.",
+  "nodes": [
+    {
+      "nodeId": "node_ground",
+      "name": "Ground Plane",
+      "type": "environment",
+      "glbFile": "assets/env_ground_plane.glb",
+      "transform": {"translation": [0, 0, 0], "rotationQuat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+      "semantic": {"role": "set-piece", "forward": [0, 1, 0]},
+      "constraints": {"grounded": true, "locked": true}
+    },
+    {
+      "nodeId": "node_cube_red",
+      "name": "Red Cube",
+      "type": "prop",
+      "glbFile": "assets/prop_cube_red.glb",
+      "transform": {"translation": [0.8, 0.8, 0], "rotationQuat": [0, 0, 0.2588, 0.9659], "scale": [1, 1, 1]},
+      "semantic": {"role": "hero", "forward": [0, 1, 0]},
+      "constraints": {"grounded": true, "locked": false}
+    },
+    {
+      "nodeId": "node_cube_blue",
+      "name": "Blue Cube",
+      "type": "prop",
+      "glbFile": "assets/prop_cube_blue.glb",
+      "transform": {"translation": [-0.8, 0.6, 0], "rotationQuat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+      "semantic": {"role": "supporting", "forward": [0, 1, 0]},
+      "constraints": {"grounded": true, "locked": false}
+    },
+    {
+      "nodeId": "node_sphere_green",
+      "name": "Green Sphere",
+      "type": "prop",
+      "glbFile": "assets/prop_sphere_green.glb",
+      "transform": {"translation": [0.5, -0.7, 0], "rotationQuat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+      "semantic": {"role": "supporting", "forward": [0, 1, 0]},
+      "constraints": {"grounded": true, "locked": false}
+    },
+    {
+      "nodeId": "node_sphere_teal",
+      "name": "Teal Sphere",
+      "type": "prop",
+      "glbFile": "assets/prop_sphere_teal.glb",
+      "transform": {"translation": [-0.6, -0.5, 0], "rotationQuat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+      "semantic": {"role": "background", "forward": [0, 1, 0]},
+      "constraints": {"grounded": true, "locked": false}
+    },
+    {
+      "nodeId": "node_cylinder_yellow",
+      "name": "Yellow Cylinder",
+      "type": "prop",
+      "glbFile": "assets/prop_cylinder_yellow.glb",
+      "transform": {"translation": [0, 1.1, 0], "rotationQuat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+      "semantic": {"role": "supporting", "forward": [0, 1, 0]},
+      "constraints": {"grounded": true, "locked": false}
+    },
+    {
+      "nodeId": "node_cone_purple",
+      "name": "Purple Cone",
+      "type": "prop",
+      "glbFile": "assets/prop_cone_purple.glb",
+      "transform": {"translation": [1.2, -0.2, 0], "rotationQuat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+      "semantic": {"role": "background", "forward": [0, 1, 0]},
+      "constraints": {"grounded": true, "locked": false}
+    },
+    {
+      "nodeId": "node_capsule_orange",
+      "name": "Orange Capsule",
+      "type": "prop",
+      "glbFile": "assets/prop_capsule_orange.glb",
+      "transform": {"translation": [-1.1, -0.9, 0], "rotationQuat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+      "semantic": {"role": "background", "forward": [0, 1, 0]},
+      "constraints": {"grounded": true, "locked": false}
+    },
+    {
+      "nodeId": "node_pyramid_pink",
+      "name": "Pink Pyramid",
+      "type": "prop",
+      "glbFile": "assets/prop_pyramid_pink.glb",
+      "transform": {"translation": [0, -1.3, 0], "rotationQuat": [0, 0, 0.3827, 0.9239], "scale": [1, 1, 1]},
+      "semantic": {"role": "supporting", "forward": [0, 1, 0]},
+      "constraints": {"grounded": true, "locked": false}
+    }
+  ]
+}

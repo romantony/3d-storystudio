@@ -1,0 +1,13 @@
+{
+  "shotId": "shot_golden_02_wide",
+  "preset": "wide",
+  "camera": {
+    "focalLengthMm": 35,
+    "translation": [3.2, -3.4, 1.6],
+    "lookAt": {"_worldPosition": [0, 0, 0.25]}
+  },
+  "passes": ["rgb", "depth", "normal", "object_id", "alpha"],
+  "resolution": {"width": 960, "height": 540},
+  "rendererEngine": "CYCLES",
+  "samples": 32
+}

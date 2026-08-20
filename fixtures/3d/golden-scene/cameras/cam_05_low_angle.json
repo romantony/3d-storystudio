@@ -1,0 +1,13 @@
+{
+  "shotId": "shot_golden_05_low_angle",
+  "preset": "low_angle",
+  "camera": {
+    "focalLengthMm": 35,
+    "translation": [1.6, -1.6, 0.18],
+    "lookAt": {"_worldPosition": [0, 0, 0.4]}
+  },
+  "passes": ["rgb", "depth", "normal", "object_id", "alpha"],
+  "resolution": {"width": 960, "height": 540},
+  "rendererEngine": "CYCLES",
+  "samples": 32
+}
