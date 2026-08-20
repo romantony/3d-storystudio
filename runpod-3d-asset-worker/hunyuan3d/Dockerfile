@@ -13,6 +13,16 @@
 # actually been verified to build.
 FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
 
+# HY3DGEN_MODELS matters as much as HF_HOME here: the shape pipeline
+# (hy3dshape's smart_load_model) does NOT use standard HF caching -- it
+# builds its own local dir from os.environ.get('HY3DGEN_MODELS',
+# '~/.cache/hy3dgen') and passes that as snapshot_download's local_dir=,
+# bypassing HF_HOME entirely. Confirmed against the actual upstream
+# source (hy3dshape/hy3dshape/utils/utils.py). Without this set, the
+# shape checkpoint re-downloads on every cold start regardless of the
+# network volume, even though HF_HOME is already pointed at it. The
+# paint pipeline's multiview weights and facebook/dinov2-giant DO use
+# plain HF caching and are already covered by HF_HOME.
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -23,7 +33,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0" \
     HF_HOME=/workspace/hf-cache \
     TRANSFORMERS_CACHE=/workspace/hf-cache \
-    MODEL_BASE=/workspace
+    MODEL_BASE=/workspace \
+    HY3DGEN_MODELS=/workspace/models/hy3dgen
 
 WORKDIR /workspace
 

@@ -61,7 +61,7 @@ vocabulary for the fleet to operate.
 
 Suggested volumes (network volume, mounted at `/workspace` on both Pods and Serverless workers on this account):
 - `trellis2-4b-a40` — the ~15GB TRELLIS.2-4B checkpoint, must land at `/workspace/models/Trellis2` specifically (that's the persistent network volume mount; anywhere else on a Pod is local container disk and gets thrown away). Pre-warm it once by attaching the volume to a RunPod Pod and running [`trellis2/scripts/download_model.py`](trellis2/scripts/download_model.py) — `handler.py` prefers this over a live Hugging Face pull automatically, and falls back to one only if the volume wasn't pre-warmed.
-- `hunyuan3d-2-1-a40` — caches the Hunyuan3D-Shape-2.1 + Hunyuan3D-Paint-2.1 checkpoints (larger — texture model included). No equivalent pre-warm script yet — `handler.py` still relies on `HF_HOME` caching there.
+- `hunyuan3d-2-1-a40` — caches the Hunyuan3D-Shape-2.1 + Hunyuan3D-Paint-2.1 checkpoints (larger — texture model included). Pre-warm with [`hunyuan3d/scripts/download_model.py`](hunyuan3d/scripts/download_model.py). Note this worker's caching isn't uniform like TRELLIS.2's: the shape pipeline uses a custom loader that ignores `HF_HOME` entirely (reads `HY3DGEN_MODELS` instead — set in the Dockerfile to `/workspace/models/hy3dgen`), while the paint pipeline's multiview weights and `facebook/dinov2-giant` use standard HF caching and do respect `HF_HOME`. The pre-warm script handles both paths; confirmed against the actual upstream `smart_load_model` source, not assumed.
 
 ## Scope: generation only, not normalization
 
