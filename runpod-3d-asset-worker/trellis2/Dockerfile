@@ -55,6 +55,20 @@ RUN git clone --recursive https://github.com/microsoft/TRELLIS.2.git /app/TRELLI
 
 WORKDIR /app/TRELLIS.2
 
+# trellis2/modules/image_feature_extractor.py's DinoV3FeatureExtractor does
+# `enumerate(self.model.layer)`, assuming the transformer blocks sit
+# directly on the DINOv3ViTModel instance. In the transformers version
+# this image installs (unpinned, floats to latest), DINOv3ViTModel wraps
+# them one level deeper: DINOv3ViTModel.model is a DINOv3ViTEncoder, and
+# .layer lives on *that* -- confirmed against transformers' current
+# modeling_dinov3_vit.py and against a real run: `self.model.embeddings`/
+# `self.model.rope_embeddings` (siblings of DINOv3ViTModel.model) resolve
+# fine, only `self.model.layer` 404s with AttributeError. Patching the
+# vendored source at build time since neither this repo's commit nor
+# transformers' version is pinned yet (still in the Phase 0 bake-off).
+RUN sed -i 's/self\.model\.layer)/self.model.model.layer)/' \
+    trellis2/modules/image_feature_extractor.py
+
 # ---- setup.sh --basic, without conda ----
 # plyfile isn't in upstream's --basic list but IS a real runtime dependency
 # of at least one SC-VAE model class (SparseUnetVaeDecoder /
