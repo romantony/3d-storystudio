@@ -85,6 +85,17 @@ RUN pip install --no-cache-dir \
         "git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8" \
     && pip install --no-cache-dir pillow-simd
 
+# pillow-simd (just installed, from upstream's --basic list) is an
+# abandoned fork (no release since ~2021) whose compiled _webp C extension
+# predates Pillow's HAVE_WEBPANIM addition. handler.py's glb.export(...,
+# extension_webp=True) triggers trimesh -> PIL.Image.save(format="WEBP"),
+# which imports PIL.WebPImagePlugin, which does `if _webp.HAVE_WEBPANIM`
+# at module level -- AttributeError on pillow-simd's older _webp, only
+# surfacing at actual export time deep in the pipeline. Force-reinstalling
+# stock Pillow after it overwrites the same PIL/ import path with a build
+# that has the attribute. Confirmed against a real crash log.
+RUN pip install --no-cache-dir --force-reinstall Pillow
+
 # ---- setup.sh --flash-attn ----
 # MAX_JOBS caps ninja's parallel nvcc compiles — flash-attn's default
 # parallelism wants ~2GB RAM per job and will OOM-kill the build on
