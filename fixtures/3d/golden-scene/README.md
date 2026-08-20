@@ -34,15 +34,16 @@ This fixture is the concrete test for that line, and for AC-04/AC-05/AC-06.
 ## Running it
 
 ```sh
-pip install boto3
-export RUNPOD_API_KEY=...          # your key -- never commit or paste this
-export BLENDER_ENDPOINT_ID=...     # the runpod-3d-render-worker endpoint id
-export R2_ACCOUNT_ID=...
-export R2_ACCESS_KEY_ID=...
-export R2_SECRET_ACCESS_KEY=...
-export R2_PUBLIC_URL=...           # e.g. https://pub-xxx.r2.dev
+pip install boto3 python-dotenv
 python3 run_golden_scene.py
 ```
+
+Reads secrets from a `.env` at the repo root (auto-loaded via
+python-dotenv — see `.env` there for the full variable list: `RUNPOD_API_KEY`,
+`BLENDER_ENDPOINT_ID`, `R2_ACCOUNT_ID`/`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY`,
+and `R2_PUBLIC_URL_DEV`). Real exported env vars still take priority over
+`.env` if both are set. `.env` is gitignored — never commit it or paste its
+contents anywhere.
 
 Exits non-zero if any shot fails or any pass comes back empty. Prints a
 per-shot pass/fail summary and the render worker's `renderTimeS` for each.

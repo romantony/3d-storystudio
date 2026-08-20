@@ -8,7 +8,9 @@ Appendix B's "same canonical scene rendered from six cameras with no
 asset regeneration" line, and for AC-04/AC-05/AC-06.
 
 Reads all secrets from the environment -- never pass API keys/credentials
-as arguments or hardcode them here.
+as arguments or hardcode them here. Auto-loads a `.env` file (repo root,
+or this fixture's own directory) via python-dotenv if present; real
+process env vars still win over anything in .env.
 
 Required env vars:
     RUNPOD_API_KEY            RunPod bearer token
@@ -17,13 +19,14 @@ Required env vars:
     R2_ACCESS_KEY_ID
     R2_SECRET_ACCESS_KEY
     R2_BUCKET_NAME            defaults to e2e-storystudio
-    R2_PUBLIC_URL             e.g. https://pub-xxx.r2.dev
+    R2_PUBLIC_URL             e.g. https://pub-xxx.r2.dev -- falls back to
+                              R2_PUBLIC_URL_DEV if R2_PUBLIC_URL isn't set,
+                              since fixture runs should use the dev bucket
 
 Usage:
-    pip install boto3
-    RUNPOD_API_KEY=... BLENDER_ENDPOINT_ID=... R2_ACCOUNT_ID=... \\
-      R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=... R2_PUBLIC_URL=... \\
-      python3 run_golden_scene.py
+    pip install boto3 python-dotenv
+    # fill in .env at the repo root, then:
+    python3 run_golden_scene.py
 """
 import copy
 import json
@@ -38,6 +41,16 @@ import boto3
 from botocore.config import Config
 
 HERE = Path(__file__).parent
+
+try:
+    from dotenv import load_dotenv
+    # repo root is 3 levels up from fixtures/3d/golden-scene/; also try
+    # this directory in case someone drops a fixture-local .env instead.
+    load_dotenv(HERE.parent.parent.parent / ".env")
+    load_dotenv(HERE / ".env")
+except ImportError:
+    pass
+
 POLL_INTERVAL_S = 5
 POLL_TIMEOUT_S = 900
 ASSET_PREFIX = "storystudio/fixtures/golden-scene"
@@ -47,6 +60,15 @@ def env(name, default=None, required=True):
     v = os.environ.get(name, default)
     if required and not v:
         sys.exit(f"Missing required env var: {name}")
+    return v
+
+
+def r2_public_url():
+    # Fixture runs are dev-only -- prefer R2_PUBLIC_URL_DEV, fall back to
+    # the plain R2_PUBLIC_URL name the worker handlers themselves use.
+    v = os.environ.get("R2_PUBLIC_URL_DEV") or os.environ.get("R2_PUBLIC_URL")
+    if not v:
+        sys.exit("Missing required env var: R2_PUBLIC_URL_DEV (or R2_PUBLIC_URL)")
     return v
 
 
@@ -65,7 +87,7 @@ def upload_assets(scene):
     """Uploads every glbFile referenced in scene.json once; returns
     {glbFile: publicUrl}."""
     bucket = env("R2_BUCKET_NAME", "e2e-storystudio", required=False)
-    public_base = env("R2_PUBLIC_URL").rstrip("/")
+    public_base = r2_public_url().rstrip("/")
     client = r2_client()
 
     glb_files = sorted({n["glbFile"] for n in scene["nodes"]})
