@@ -28,6 +28,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 \
     && update-alternatives --install /usr/bin/python  python  /usr/bin/python3.10 1
 
+# nvdiffrast's pyproject.toml declares its package name via PEP 621
+# ([project] table), which needs setuptools>=64 to read. --no-build-isolation
+# below means pip builds every extension with whatever setuptools is already
+# here rather than what each package's build-system.requires asks for --
+# Ubuntu 22.04's stock setuptools is too old, silently can't see the name,
+# and pip installs the wheel as a package literally called "UNKNOWN" instead
+# of "nvdiffrast" (confirmed in a real build log: "Successfully installed
+# UNKNOWN-0.0.0" -- the compile succeeded, the package identity didn't, so
+# `import nvdiffrast` fails at runtime despite the build going green).
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 # Pinned to TRELLIS.2's documented combo (torch 2.6.0 / cu124). Do not float
 # this — flash-attn/nvdiffrast below are compiled against this exact ABI.
 RUN pip install --no-cache-dir \
