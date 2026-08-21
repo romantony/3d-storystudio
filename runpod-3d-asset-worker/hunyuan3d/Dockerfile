@@ -70,7 +70,13 @@ ARG HUNYUAN3D_COMMIT=main
 RUN git clone https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1.git /workspace/Hunyuan3D-2.1 \
     && cd /workspace/Hunyuan3D-2.1 && git checkout ${HUNYUAN3D_COMMIT}
 
-RUN pip install --no-cache-dir -r /workspace/Hunyuan3D-2.1/requirements.txt
+# Strip upstream's --extra-index-url lines (Tencent/Aliyun mirrors) before
+# installing: they're reachable from outside China but extremely slow, and
+# pip queries every extra index for every package. On GitHub-hosted runners
+# this stalled the build for ~2h before pip finally errored out. PyPI proper
+# has everything these pin.
+RUN sed -i '/^--extra-index-url/d' /workspace/Hunyuan3D-2.1/requirements.txt \
+    && pip install --no-cache-dir -r /workspace/Hunyuan3D-2.1/requirements.txt
 
 RUN cd /workspace/Hunyuan3D-2.1/hy3dpaint/custom_rasterizer \
     && export TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0" \
