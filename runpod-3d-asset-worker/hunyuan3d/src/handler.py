@@ -123,11 +123,29 @@ def get_paint_pipeline(max_num_view: int, resolution: int):
 
 def _export_mesh(mesh_obj: Any, dest_path: Path) -> Path:
     """Shape-pipeline output is trimesh-like per the repo's dependency set
-    (trimesh/pymeshlab in requirements.txt) — export via .export(). If a
-    pipeline instead hands back a path string (paint_pipeline's return type
-    isn't fully specified in the README), use that file directly."""
+    (trimesh/pymeshlab in requirements.txt) — export via .export().
+
+    Paint-pipeline output is a path string, but it's an upstream bug, not a
+    documented contract: Hunyuan3DPaintPipeline.__call__ (textureGenPipeline.py)
+    saves the mesh as OBJ, then -- since save_glb defaults to True, and we
+    never pass save_glb=False -- calls convert_obj_to_glb() to also produce
+    a real .glb right next to it, but its `return output_mesh_path` line
+    returns the *.obj* path regardless, leaving the .glb it just built
+    unused. Confirmed against a real render-worker failure: the uploaded
+    "textured.glb" was actually plain-text Wavefront OBJ (`file` reported
+    "ASCII text"; content started with `mtllib ... v ... f ...`), which
+    Blender's gltf importer silently produced zero objects from -- no
+    exception, no error, RGB pass just never got written. If the returned
+    path is an .obj with a .glb sibling (i.e. this exact case), prefer the
+    real glb rather than trusting the extension-less-but-wrong return
+    value."""
     if isinstance(mesh_obj, (str, os.PathLike)):
-        return Path(mesh_obj)
+        mesh_path = Path(mesh_obj)
+        if mesh_path.suffix == ".obj":
+            glb_sibling = mesh_path.with_suffix(".glb")
+            if glb_sibling.exists():
+                return glb_sibling
+        return mesh_path
     mesh_obj.export(str(dest_path))
     return dest_path
 
