@@ -33,6 +33,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Must happen before huggingface_hub is imported -- it reads HF_HOME at
+# import time to compute its cache path constants. Run on a bare RunPod Pod
+# (not inside the worker image, which sets these as Dockerfile ENV), this
+# silently fell back to ~/.cache/huggingface on the pod's local container
+# disk instead of the network volume -- confirmed against a real run where
+# the paint + dinov2 downloads (~16GB) landed there instead of /workspace
+# and would've been lost on pod stop.
+os.environ.setdefault("HF_HOME", "/workspace/hf-cache")
+os.environ.setdefault("TRANSFORMERS_CACHE", "/workspace/hf-cache")
+
 subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "huggingface_hub"])
 
 from huggingface_hub import snapshot_download
@@ -82,8 +92,18 @@ def download_paint_multiview():
 
 
 def download_dinov2():
+    """ignore_patterns skips pytorch_model.bin -- the paint pipeline's view
+    processor loads facebook/dinov2-giant via transformers, which prefers
+    safetensors when both are present, so the .bin duplicate (same ~4.5GB
+    of weights in a second format) was pure waste. Confirmed against a real
+    run: this repo downloaded 9.09GB before the filter, vs the ~4.5GB the
+    safetensors file alone accounts for."""
     print(f"[START] facebook/dinov2-giant -> standard HF cache (HF_HOME={os.environ.get('HF_HOME')})", flush=True)
-    path = snapshot_download(repo_id="facebook/dinov2-giant", token=HF_TOKEN)
+    path = snapshot_download(
+        repo_id="facebook/dinov2-giant",
+        ignore_patterns=["*.bin"],
+        token=HF_TOKEN,
+    )
     print(f"[DONE] dinov2-giant -> {path}", flush=True)
 
 
