@@ -87,6 +87,17 @@ RUN sed -i \
         /workspace/Hunyuan3D-2.1/requirements.txt \
     && pip install --no-cache-dir -r /workspace/Hunyuan3D-2.1/requirements.txt
 
+# basicsr 1.4.2 (a realesrgan dependency, used by the paint pipeline's
+# super-resolution step) imports from the private torchvision.transforms.
+# functional_tensor module, which was deprecated in torchvision 0.15 and
+# removed entirely in 0.17+ -- we're on 0.20.1. rgb_to_grayscale has always
+# also been in the public torchvision.transforms.functional module with the
+# same signature; this is the standard fix for this well-known basicsr/
+# Real-ESRGAN incompatibility. Confirmed only one occurrence in basicsr 1.4.2.
+RUN sed -i \
+        's/from torchvision\.transforms\.functional_tensor import rgb_to_grayscale/from torchvision.transforms.functional import rgb_to_grayscale/' \
+        /workspace/miniconda3/envs/hunyuan3d21/lib/python3.11/site-packages/basicsr/data/degradations.py
+
 # custom_rasterizer's setup.py does `import torch` directly and ships no
 # pyproject.toml, but pip still build-isolates it by default (PEP 517, via
 # the implicit setuptools legacy backend) into a venv that only has
