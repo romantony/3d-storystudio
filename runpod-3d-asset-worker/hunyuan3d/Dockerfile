@@ -87,10 +87,16 @@ RUN sed -i \
         /workspace/Hunyuan3D-2.1/requirements.txt \
     && pip install --no-cache-dir -r /workspace/Hunyuan3D-2.1/requirements.txt
 
+# custom_rasterizer's setup.py does `import torch` directly and ships no
+# pyproject.toml, but pip still build-isolates it by default (PEP 517, via
+# the implicit setuptools legacy backend) into a venv that only has
+# setuptools/wheel -- not the torch already installed in this env. Without
+# --no-build-isolation it fails with "ModuleNotFoundError: No module named
+# 'torch'" before ever reaching the CUDA compile.
 RUN cd /workspace/Hunyuan3D-2.1/hy3dpaint/custom_rasterizer \
     && export TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0" \
     && export CUDA_NVCC_FLAGS="-allow-unsupported-compiler" \
-    && pip install --no-cache-dir -e .
+    && pip install --no-cache-dir --no-build-isolation -e .
 
 RUN cd /workspace/Hunyuan3D-2.1/hy3dpaint/DifferentiableRenderer \
     && bash compile_mesh_painter.sh
