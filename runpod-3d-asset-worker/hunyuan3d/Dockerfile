@@ -23,6 +23,16 @@ FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
 # network volume, even though HF_HOME is already pointed at it. The
 # paint pipeline's multiview weights and facebook/dinov2-giant DO use
 # plain HF caching and are already covered by HF_HOME.
+#
+# HF_MODULES_CACHE is set explicitly (rather than left to its diffusers
+# default of HF_HOME/modules) to keep it OFF the network volume. It's
+# where diffusers' custom_pipeline loader (the paint pipeline's
+# multiviewDiffusionNet) extracts Python source at runtime -- into a
+# fixed, non-namespaced diffusers_modules/local/ path, the same for every
+# repo it's ever asked to load code from. That's fine as an ephemeral
+# per-process scratch dir; it's not something that should persist across
+# cold starts or be shared with whatever else writes to this volume, so
+# route it to the container's own /tmp instead of the volume HF_HOME sits on.
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -34,7 +44,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HF_HOME=/workspace/hf-cache \
     TRANSFORMERS_CACHE=/workspace/hf-cache \
     MODEL_BASE=/workspace \
-    HY3DGEN_MODELS=/workspace/models/hy3dgen
+    HY3DGEN_MODELS=/workspace/models/hy3dgen \
+    HF_MODULES_CACHE=/tmp/hf-modules-cache
 
 WORKDIR /workspace
 
