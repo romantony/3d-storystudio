@@ -75,9 +75,11 @@ RUN pip install --no-cache-dir \
     torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
     --index-url https://download.pytorch.org/whl/cu124
 
-# Pin HUNYUAN3D_COMMIT to the SHA benchmarked in the Phase 0 spike once
-# chosen — floating "main" is only acceptable for the initial bake-off.
-ARG HUNYUAN3D_COMMIT=main
+# Pinned to the exact commit this Dockerfile's ~10 build/runtime fixes were
+# verified against (main HEAD as of the last successful build, 2026-08-21 --
+# main had been static since 2025-10-17, so this is also current upstream).
+# Bump deliberately, not by letting "main" float, if upstream ever changes.
+ARG HUNYUAN3D_COMMIT=82920d643c0dc2f7bfd7255f45f62d386edfe60c
 RUN git clone https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1.git /workspace/Hunyuan3D-2.1 \
     && cd /workspace/Hunyuan3D-2.1 && git checkout ${HUNYUAN3D_COMMIT}
 

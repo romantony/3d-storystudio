@@ -45,9 +45,11 @@ RUN pip install --no-cache-dir \
     torch==2.6.0 torchvision==0.21.0 \
     --index-url https://download.pytorch.org/whl/cu124
 
-# Pin TRELLIS2_COMMIT to the SHA benchmarked in the Phase 0 spike once
-# chosen — floating "main" is only acceptable for the initial bake-off.
-ARG TRELLIS2_COMMIT=main
+# Pinned to the exact commit this Dockerfile's build/runtime fixes were
+# verified against (main HEAD as of the last successful build, 2026-08-20 --
+# main had been static since 2026-06-05, so this is also current upstream).
+# Bump deliberately, not by letting "main" float, if upstream ever changes.
+ARG TRELLIS2_COMMIT=75fbf0183001ed9876c8dbb35de6b68552ee08bd
 RUN git clone --recursive https://github.com/microsoft/TRELLIS.2.git /app/TRELLIS.2 \
     && cd /app/TRELLIS.2 \
     && git checkout ${TRELLIS2_COMMIT} \
