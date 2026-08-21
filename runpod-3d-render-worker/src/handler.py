@@ -137,7 +137,20 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
 
         rgb_path = out_dir / "rgb.png"
         if not rgb_path.exists() or rgb_path.stat().st_size == 0:
-            return {"error": "3D_RENDER_EMPTY_FRAME", "detail": "renderer produced no rgb.png"}
+            # Blender can exit 0 and still produce nothing -- e.g. a glTF
+            # import that silently yields zero objects from a malformed
+            # asset. Without stdout/stderr here this is undiagnosable from
+            # the API response alone (confirmed against a real case: the
+            # hunyuan3d OBJ-mislabeled-as-glb bug took far longer to track
+            # down than necessary because this path returned no detail).
+            LOGGER.error("Renderer produced no rgb.png. stdout: %s | stderr: %s",
+                         proc.stdout[-2000:], proc.stderr[-2000:])
+            return {
+                "error": "3D_RENDER_EMPTY_FRAME",
+                "detail": "renderer produced no rgb.png",
+                "stdout": proc.stdout[-2000:],
+                "stderr": proc.stderr[-2000:],
+            }
 
         blender_version = ""
         version_file = out_dir / "version.txt"

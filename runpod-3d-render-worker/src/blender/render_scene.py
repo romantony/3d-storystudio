@@ -76,8 +76,12 @@ def add_default_lighting():
     JSON doesn't define one yet (Phase 0 golden scene has no /Lights nodes)
     — a flat sun + world fill keeps the render non-black without editorializing
     on final look, which spec §11.2 leaves to the generative stage."""
+    # energy/fill bumped from 3.0/0.35 -- dark-toned PBR materials (e.g. the
+    # treasure chest's leather/bronze) rendered visibly underlit at the
+    # original values, confirmed against real golden-scene and bake-off
+    # renders.
     sun_data = bpy.data.lights.new("key_sun", type='SUN')
-    sun_data.energy = 3.0
+    sun_data.energy = 5.0
     sun = bpy.data.objects.new("key_sun", sun_data)
     bpy.context.scene.collection.objects.link(sun)
     sun.rotation_euler = (math.radians(55), 0, math.radians(35))
@@ -87,7 +91,7 @@ def add_default_lighting():
     world.use_nodes = True
     bg = world.node_tree.nodes.get("Background")
     if bg:
-        bg.inputs[1].default_value = 0.35  # ambient fill strength
+        bg.inputs[1].default_value = 0.6  # ambient fill strength
 
 
 def setup_camera(camera_cfg, width, height):
