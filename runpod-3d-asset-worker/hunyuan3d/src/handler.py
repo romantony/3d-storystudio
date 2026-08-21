@@ -107,7 +107,15 @@ def get_paint_pipeline(max_num_view: int, resolution: int):
 
         LOGGER.info("Loading Hunyuan3DPaintPipeline (max_num_view=%d, resolution=%d)", max_num_view, resolution)
         t0 = time.time()
-        _paint_pipeline = Hunyuan3DPaintPipeline(Hunyuan3DPaintConfig(max_num_view=max_num_view, resolution=resolution))
+        paint_config = Hunyuan3DPaintConfig(max_num_view=max_num_view, resolution=resolution)
+        # Hunyuan3DPaintConfig's own default ("ckpt/RealESRGAN_x4plus.pth")
+        # is relative to hy3dpaint/, not the repo root we run from -- confirmed
+        # against a real job traceback (FileNotFoundError: 'ckpt/RealESRGAN_
+        # x4plus.pth') and against upstream's own demo.py/gradio_app.py, which
+        # both patch this exact attribute the same way rather than relying on
+        # the class default.
+        paint_config.realesrgan_ckpt_path = "hy3dpaint/ckpt/RealESRGAN_x4plus.pth"
+        _paint_pipeline = Hunyuan3DPaintPipeline(paint_config)
         _paint_pipeline_cfg = cfg_key
         LOGGER.info("Paint pipeline ready in %.1fs", time.time() - t0)
     return _paint_pipeline
