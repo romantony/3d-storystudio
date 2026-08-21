@@ -52,7 +52,7 @@ RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.s
 ENV PATH="/workspace/miniconda3/bin:${PATH}"
 RUN conda tos accept --channel https://repo.anaconda.com/pkgs/main \
     && conda tos accept --channel https://repo.anaconda.com/pkgs/r \
-    && conda create -n hunyuan3d21 python=3.10 \
+    && conda create -n hunyuan3d21 python=3.11 \
     && conda config --set always_yes true
 ENV PATH="/workspace/miniconda3/envs/hunyuan3d21/bin:${PATH}"
 
@@ -75,7 +75,16 @@ RUN git clone https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1.git /workspace/Hu
 # pip queries every extra index for every package. On GitHub-hosted runners
 # this stalled the build for ~2h before pip finally errored out. PyPI proper
 # has everything these pin.
-RUN sed -i '/^--extra-index-url/d' /workspace/Hunyuan3D-2.1/requirements.txt \
+#
+# bpy==4.0 has never had a PyPI wheel for any Python version (bpy wheels
+# start at 4.2.0, cp311+ only) -- that's also why the conda env above is
+# 3.11, not upstream's 3.10. bpy is a hard runtime dependency here: the
+# paint pipeline (textureGenPipeline.py -> DifferentiableRenderer/mesh_utils.py)
+# does `import bpy` at module load, it's not an optional render-tool extra.
+RUN sed -i \
+        -e '/^--extra-index-url/d' \
+        -e 's/^bpy==4\.0$/bpy==4.2.0/' \
+        /workspace/Hunyuan3D-2.1/requirements.txt \
     && pip install --no-cache-dir -r /workspace/Hunyuan3D-2.1/requirements.txt
 
 RUN cd /workspace/Hunyuan3D-2.1/hy3dpaint/custom_rasterizer \
