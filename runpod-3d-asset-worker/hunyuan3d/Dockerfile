@@ -138,6 +138,18 @@ ENV LD_LIBRARY_PATH="/workspace/miniconda3/envs/hunyuan3d21/lib:${LD_LIBRARY_PAT
 # Worker glue — not part of upstream Hunyuan3D-2.1.
 RUN pip install --no-cache-dir runpod boto3
 
+# pytorch_lightning's lightning_fabric (pulled in by hunyuanpaintpbr/unet/
+# model.py's `import pytorch_lightning`) does `__import__("pkg_resources")
+# .declare_namespace(...)` at import time -- a legacy namespace-package
+# pattern. pkg_resources was removed from setuptools starting at 82.0.0
+# (still present in 81.0.0); nothing in requirements.txt pins setuptools,
+# so the earlier pip installs above pull whatever's latest and silently
+# lose it. Confirmed against a real job traceback (ModuleNotFoundError:
+# No module named 'pkg_resources') and against the actual setuptools
+# wheels on PyPI (81.0.0 bundles pkg_resources/, 82.0.0 doesn't). Kept as
+# the last pip step so nothing after this re-upgrades it.
+RUN pip install --no-cache-dir "setuptools<82"
+
 WORKDIR /workspace/Hunyuan3D-2.1
 COPY src/handler.py /workspace/Hunyuan3D-2.1/handler.py
 
