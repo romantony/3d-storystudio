@@ -133,6 +133,19 @@ RUN cd /workspace/Hunyuan3D-2.1/hy3dpaint \
     && cd utils \
     && sed -i 's/custom_pipeline = config\.custom_pipeline/custom_pipeline = os.path.join(os.path.dirname(__file__),"..","hunyuanpaintpbr")/' multiview_utils.py
 
+# convert_obj_to_glb wraps everything in a bare `except Exception: return
+# False`, and its only caller (textureGenPipeline.py) ignores the return
+# value -- so on failure the pipeline silently keeps handing back the .obj
+# path and _export_mesh (handler.py) uploads that, mislabeled as .glb, with
+# zero diagnostics anywhere. Confirmed against a real job: the uploaded
+# "textured.glb" was actually Wavefront OBJ, but a local repro of this exact
+# function (same bpy==4.2.0, same import order with torch loaded first)
+# succeeded cleanly against both a trivial mesh and the real downloaded OBJ
+# -- so whatever's failing in the container specifically needs the actual
+# traceback, not another guess.
+RUN sed -i '/except Exception:/a\        import traceback; traceback.print_exc()' \
+    /workspace/Hunyuan3D-2.1/hy3dpaint/DifferentiableRenderer/mesh_utils.py
+
 ENV LD_LIBRARY_PATH="/workspace/miniconda3/envs/hunyuan3d21/lib:${LD_LIBRARY_PATH}"
 
 # Worker glue — not part of upstream Hunyuan3D-2.1.
