@@ -132,7 +132,26 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         from o_voxel import postprocess as o_voxel_postprocess
 
         with torch.inference_mode():
-            mesh = pipe.run(image)[0]
+            try:
+                mesh = pipe.run(image)[0]
+            except ValueError as exc:
+                # trellis2_image_to_3d.py's preprocess_image() does
+                # `np.min(np.argwhere(alpha > 0.8*255)[:, 1])` after running
+                # RMBG-2.0 on the input. If RMBG finds zero foreground
+                # pixels (e.g. a full-scene/interior image instead of an
+                # isolated single-object shot), that argwhere is empty and
+                # np.min raises this exact opaque message -- not a bug in
+                # our worker, but worth surfacing as an actionable error
+                # instead of a raw numpy stack trace. Confirmed against the
+                # vendored source at the pinned TRELLIS2_COMMIT.
+                if "zero-size array" in str(exc):
+                    raise ValueError(
+                        "TRELLIS.2 found no foreground subject in the input "
+                        "image (background removal produced an all-transparent "
+                        "mask). Provide an isolated single-object product shot, "
+                        "not a full-scene or interior image."
+                    ) from exc
+                raise
         mesh.simplify(NVDIFFRAST_VERTEX_LIMIT)
 
         glb = o_voxel_postprocess.to_glb(
