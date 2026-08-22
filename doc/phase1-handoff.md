@@ -45,6 +45,137 @@ normalization pipeline (§9.1) and full scene/shot USD authoring
 (extending the pattern in `scene_usd.py`) are the only pieces of "core
 3D logic" still owed; everything else below is application layer.
 
+### Calling the endpoints
+
+All three workers are RunPod Serverless endpoints, called the same way.
+`RUNPOD_API_KEY` is the **only** credential Step Functions/Lambda needs
+to call them — R2 upload credentials live inside the workers, never in
+the caller.
+
+```
+POST https://api.runpod.ai/v2/{ENDPOINT_ID}/run
+Authorization: Bearer $RUNPOD_API_KEY
+Content-Type: application/json
+
+{ "input": { ...worker-specific fields below... } }
+
+→ { "id": "<jobId>", "status": "IN_QUEUE" }
+```
+
+```
+GET https://api.runpod.ai/v2/{ENDPOINT_ID}/status/{jobId}
+Authorization: Bearer $RUNPOD_API_KEY
+
+→ { "status": "IN_QUEUE" | "IN_PROGRESS" | "COMPLETED" | "FAILED", "output": {...} }
+```
+
+Poll `/status/{jobId}` until `COMPLETED`/`FAILED`. All three endpoints
+scale to zero (`workersMin: 0`) with a 5s idle timeout, so the first
+request after a quiet period pays a cold-start (image pull + model
+load), typically the largest chunk of `delayTime`.
+
+#### Object generation — Hunyuan3D 2.1 (primary)
+
+`ENDPOINT_ID = i703r1118k06ot` · `workersMax: 2`, `workersStandby: 2` ·
+GPU pool: RTX 6000 Ada / L40S / RTX A6000 · `executionTimeoutMs: 600000`
+
+| `input` field | Required | Notes |
+|---|---|---|
+| `image_url` or `image_b64` | one of these | Isolated single-object shot — same input class TRELLIS.2 needs (see below) |
+| `quality` | no (default `"standard"`) | `"standard"` = shape + texture, `"shape_only"` = untextured mesh only |
+| `maxNumView` | no (default `6`) | Texture-pass view count; rarely needs overriding |
+| `paintResolution` | no (default `512`) | Texture-pass resolution; rarely needs overriding |
+| `project_id`, `frame_id` | no | If both given, asset key is deterministic (`{project_id}_{frame_id}_asset_generate.glb`); otherwise a timestamp+jobId key is used |
+| `output_key` | no | Explicit override for the key above |
+| `sourceImageId` | no | Passed through into the response's `provenance`, not used for logic |
+
+```json
+// response (success)
+{ "modelUrl": "https://.../model.glb",
+  "provenance": { "provider": "hunyuan3d", "modelVersion": "Hunyuan3D-2.1",
+                   "quality": "standard", "textured": true,
+                   "sourceImageId": "img_123", "genTimeS": 104.2 },
+  "cold_start": true }
+```
+`cold_start` is present (and `true`) only on the first job after a cold
+start — useful for excluding warm-up latency from p50/p95 metrics.
+
+On failure: `{"error": "<message>", "traceback": "<python traceback>"}`.
+There's no fixed error-code taxonomy on the asset workers yet — Phase
+1's job wrapper should map these onto spec §24.1's codes
+(`3D_ASSET_PROVIDER_OOM`, `3D_ASSET_INVALID_GEOMETRY`, ...) rather than
+surface the raw Python message to the UI.
+
+#### Object generation — TRELLIS.2 (fallback)
+
+`ENDPOINT_ID = rr133cjx94lkwt` · `workersMax: 4`, `workersStandby: 4` ·
+GPU pool: A40 / RTX A6000 · `executionTimeoutMs: 600000`
+
+| `input` field | Required | Notes |
+|---|---|---|
+| `image_url` or `image_b64` | one of these | Same isolated-object requirement as Hunyuan3D |
+| `quality` | no (default `"standard"`) | `"draft"` \| `"standard"` \| `"high"` — **a different tiering scheme than Hunyuan3D** (decimation target + texture size, not a shape/texture toggle). Don't assume the two providers share a quality vocabulary at the API layer |
+| `seed` | no | Passed to `torch.manual_seed` |
+| `project_id`, `frame_id`, `output_key`, `sourceImageId` | no | Same as Hunyuan3D |
+
+```json
+// response (success)
+{ "modelUrl": "https://.../model.glb",
+  "provenance": { "provider": "trellis2", "modelVersion": "TRELLIS.2-4B",
+                   "quality": "standard", "seed": null,
+                   "sourceImageId": "img_123", "genTimeS": 190.3 },
+  "cold_start": true }
+```
+
+Known input-validation case (fixed 2026-08-22): if RMBG-2.0 finds zero
+foreground pixels — e.g. a full-scene/interior image instead of an
+isolated single-object shot — this returns a clear
+`{"error": "TRELLIS.2 found no foreground subject in the input
+image..."}` rather than a crash. Treat this as a **user-facing input
+validation failure**, not a transient/retry-worthy error.
+
+#### Reference render — Blender worker
+
+`ENDPOINT_ID = 5cr41g9wtojd1t` · `workersMax: 2`, `workersStandby: 2` ·
+GPU pool: RTX A4000 / A4500 / RTX 4000 Ada / RTX 2000 Ada ·
+`executionTimeoutMs: 600000` (also the hard render timeout, configurable
+worker-side via `RENDER_TIMEOUT_S`)
+
+| `input` field | Required | Notes |
+|---|---|---|
+| `camera` | **yes** | `{focalLengthMm, translation:[x,y,z], lookAt:{"_worldPosition":[x,y,z]}` or `rotationQuat:[x,y,z,w], dof:{enabled, focusDistanceM}}` |
+| `scene` + `nodes` | one of these two scene-composition forms is required | `scene:{sceneId, upAxis, units}` plus `nodes:[{nodeId, assetUrl, transform:{translation, rotationQuat, scale}}, ...]` |
+| `sceneUsd` or `sceneUsdUrl` | (alternative to `scene`+`nodes`) | Raw `.usda` text, or a URL to fetch one — parsed via `scene_usd.py` into the identical node shape above. **Every `assetUrl` (flat or inside the USD's `storystudio:assetUrl` attributes) must be a publicly fetchable URL** — the worker downloads it directly with no auth, so assets need to be on R2 public, not S3 private, before rendering |
+| `passes` | no (default all 5) | `["rgb","depth","normal","object_id","alpha"]` |
+| `resolution` | no (default `{width:1920,height:1080}`) | |
+| `rendererEngine` | no (default `"CYCLES"`) | |
+| `samples` | no (default `64`) | |
+| `shotId`, `sceneRevision`, `shotRevision`, `projectId`, `frameId` | no | Metadata passthrough into the render manifest, not used for render logic |
+
+```json
+// response (success)
+{ "renderTimeS": 18.2,
+  "outputs": { "rgb": "https://.../rgb.png", "depth": "https://.../depth.exr",
+               "normal": "https://.../normal.exr", "object_id": "https://.../object_id.png",
+               "alpha": "https://.../alpha.png", "masks": "https://.../masks.json",
+               "manifest": "https://.../manifest.json" } }
+```
+
+This is the one worker that already uses spec §24.1's real error codes —
+propagate them as-is rather than re-mapping:
+
+| `error` | Meaning |
+|---|---|
+| `3D_SCENE_REFERENCE_NOT_FOUND` | Missing `camera`, or no usable scene composition (`scene`/`nodes` empty and no `sceneUsd`/`sceneUsdUrl`) |
+| `3D_RENDER_WORKER_FAILED` | Blender subprocess exited nonzero, or exceeded the render timeout |
+| `3D_RENDER_EMPTY_FRAME` | Blender exited 0 but produced no `rgb.png` — response includes `stdout`/`stderr` for diagnosis; see Part 2.4's bug 3 for why this check exists |
+
+**Capacity note:** all three endpoints currently scale to a small worker
+cap (`workersMax` 2/4/2). Phase 1 traffic beyond that queues rather than
+autoscaling further — size QuarterMaster's shared GPU budget with this
+in mind before assuming render/generate throughput is elastic (see
+Risks, below).
+
 ---
 
 ## Part 1 — Implement
