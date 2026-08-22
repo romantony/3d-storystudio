@@ -27,7 +27,15 @@ Usage:
     pip install boto3 python-dotenv
     # fill in .env at the repo root, then:
     python3 run_golden_scene.py
+
+    # to also validate the USD -> Blender path (spec Appendix B Phase 0
+    # DoD), composing scene.json into a .usda stage via the render
+    # worker's own scene_usd.compose_usda() and sending that instead of
+    # flat scene+nodes JSON:
+    pip install usd-core
+    python3 run_golden_scene.py --usd
 """
+import argparse
 import copy
 import json
 import os
@@ -41,6 +49,7 @@ import boto3
 from botocore.config import Config
 
 HERE = Path(__file__).parent
+RENDER_WORKER_SRC = HERE.parent.parent.parent / "runpod-3d-render-worker" / "src"
 
 try:
     from dotenv import load_dotenv
@@ -103,27 +112,35 @@ def upload_assets(scene):
     return url_by_file
 
 
-def build_input(scene, camera_cfg, url_by_file):
+def build_input(scene, camera_cfg, url_by_file, use_usd=False):
     nodes = []
     for n in scene["nodes"]:
         node = copy.deepcopy(n)
         node["assetUrl"] = url_by_file[node.pop("glbFile")]
         nodes.append(node)
 
-    return {
+    scene_meta = {"sceneId": scene["sceneId"], "upAxis": scene["upAxis"], "units": scene["units"]}
+
+    payload = {
         "shotId": camera_cfg["shotId"],
         "sceneRevision": scene["revision"],
         "shotRevision": 1,
         "projectId": scene["projectId"],
         "frameId": camera_cfg["shotId"],
-        "scene": {"sceneId": scene["sceneId"], "upAxis": scene["upAxis"], "units": scene["units"]},
-        "nodes": nodes,
         "camera": camera_cfg["camera"],
         "passes": camera_cfg["passes"],
         "resolution": camera_cfg["resolution"],
         "rendererEngine": camera_cfg["rendererEngine"],
         "samples": camera_cfg["samples"],
     }
+    if use_usd:
+        sys.path.insert(0, str(RENDER_WORKER_SRC))
+        import scene_usd  # the render worker's own compose/parse module -- not reimplemented here
+        payload["sceneUsd"] = scene_usd.compose_usda({**scene_meta, "revision": scene["revision"]}, nodes)
+    else:
+        payload["scene"] = scene_meta
+        payload["nodes"] = nodes
+    return payload
 
 
 def api_request(path, method="GET", body=None):
@@ -164,11 +181,11 @@ def check_output_nonempty(url):
         return False
 
 
-def run_shot(scene, camera_path, url_by_file):
+def run_shot(scene, camera_path, url_by_file, use_usd=False):
     camera_cfg = json.loads(camera_path.read_text())
-    payload = build_input(scene, camera_cfg, url_by_file)
+    payload = build_input(scene, camera_cfg, url_by_file, use_usd=use_usd)
 
-    print(f"\n=== {camera_cfg['shotId']} ({camera_cfg['preset']}) ===")
+    print(f"\n=== {camera_cfg['shotId']} ({camera_cfg['preset']}){' [USD]' if use_usd else ''} ===")
     submitted = api_request("/run", method="POST", body={"input": payload})
     job_id = submitted["id"]
     print(f"  job {job_id} submitted, polling...")
@@ -197,6 +214,13 @@ def run_shot(scene, camera_path, url_by_file):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--usd", action="store_true",
+                         help="Compose scene.json into a USD stage (scene_usd.compose_usda) and send it "
+                              "as sceneUsd instead of flat scene+nodes JSON -- validates the USD -> "
+                              "Blender path. Requires `pip install usd-core`.")
+    args = parser.parse_args()
+
     scene = json.loads((HERE / "scene.json").read_text())
     camera_files = sorted((HERE / "cameras").glob("*.json"))
     if len(camera_files) != 6:
@@ -206,15 +230,16 @@ def main():
 
     results = {}
     for camera_path in camera_files:
-        results[camera_path.name] = run_shot(scene, camera_path, url_by_file)
+        results[camera_path.name] = run_shot(scene, camera_path, url_by_file, use_usd=args.usd)
 
     print("\n=== Golden scene summary ===")
     for name, ok in results.items():
         print(f"  {'PASS' if ok else 'FAIL'}  {name}")
     if not all(results.values()):
         sys.exit(1)
-    print(f"\nAll {len(results)} shots rendered successfully from the same {len(url_by_file)} "
-          f"uploaded assets -- zero asset regeneration across cameras.")
+    mode = "USD-composed" if args.usd else "flat-JSON"
+    print(f"\nAll {len(results)} shots ({mode} scene input) rendered successfully from the same "
+          f"{len(url_by_file)} uploaded assets -- zero asset regeneration across cameras.")
 
 
 if __name__ == "__main__":

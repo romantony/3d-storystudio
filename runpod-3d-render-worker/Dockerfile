@@ -30,9 +30,17 @@ RUN wget -q "https://download.blender.org/release/Blender4.5/blender-${BLENDER_V
     && rm /tmp/blender.tar.xz
 ENV PATH="/opt/blender:${PATH}"
 
-RUN pip install --no-cache-dir runpod boto3
+# usd-core is Pixar/AOUSD's official pip distribution of OpenUSD's Python
+# bindings (`pxr`) -- pure Python-facing wheel, no CUDA/GPU dependency, has
+# a cp311 manylinux wheel (confirmed against a real PyPI JSON API query
+# against this pin, not guessed). Runs under this image's system python3.11
+# (handler.py), not Blender's bundled python -- scene composition/parsing
+# happens before the Blender subprocess is ever invoked. Architecture
+# decision (implementation plan §02): "OpenUSD Python, in-worker."
+RUN pip install --no-cache-dir runpod boto3 usd-core==26.8
 
 COPY src/handler.py /app/handler.py
+COPY src/scene_usd.py /app/scene_usd.py
 COPY src/blender/render_scene.py /app/blender/render_scene.py
 
 CMD ["python3", "-u", "/app/handler.py"]

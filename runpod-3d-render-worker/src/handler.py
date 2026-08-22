@@ -13,6 +13,8 @@ import boto3
 import runpod
 from botocore.config import Config
 
+import scene_usd
+
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=LOG_LEVEL,
@@ -81,13 +83,36 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     try:
         inp: Dict[str, Any] = job.get("input", {})
 
-        scene = inp.get("scene")
         camera = inp.get("camera")
-        nodes: List[Dict[str, Any]] = inp.get("nodes", [])
-        if not scene or not camera:
-            return {"error": "3D_SCENE_REFERENCE_NOT_FOUND", "detail": "input.scene and input.camera are required"}
+        if not camera:
+            return {"error": "3D_SCENE_REFERENCE_NOT_FOUND", "detail": "input.camera is required"}
+
+        # Scene composition can arrive as flat scene+nodes JSON (original
+        # contract) or as a USD stage (sceneUsd text, or sceneUsdUrl to
+        # fetch one) -- USD is parsed into the exact same scene+nodes
+        # shape via scene_usd.parse_usda() so every downstream step (asset
+        # download, scene.json, the Blender subprocess) is unchanged
+        # either way. Spec Appendix B Phase 0 DoD: "Validate USD -> Blender
+        # import ... round-trip."
+        scene_usd_text = inp.get("sceneUsd")
+        scene_usd_url = inp.get("sceneUsdUrl")
+        if scene_usd_url and not scene_usd_text:
+            req = urllib.request.Request(scene_usd_url, headers={"User-Agent": "python-blender-render/1.0"})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                scene_usd_text = resp.read().decode("utf-8")
+
+        nodes: List[Dict[str, Any]]
+        if scene_usd_text:
+            scene, nodes = scene_usd.parse_usda(scene_usd_text)
+        else:
+            scene = inp.get("scene")
+            nodes = inp.get("nodes", [])
+            if not scene:
+                return {"error": "3D_SCENE_REFERENCE_NOT_FOUND",
+                        "detail": "input.scene (or sceneUsd/sceneUsdUrl) is required"}
+
         if not nodes:
-            return {"error": "3D_SCENE_REFERENCE_NOT_FOUND", "detail": "input.nodes is empty — nothing to render"}
+            return {"error": "3D_SCENE_REFERENCE_NOT_FOUND", "detail": "no renderable nodes in scene"}
 
         passes = inp.get("passes", ["rgb", "depth", "normal", "object_id", "alpha"])
         resolution = inp.get("resolution", {"width": 1920, "height": 1080})

@@ -29,13 +29,20 @@ This fixture is the concrete test for that line, and for AC-04/AC-05/AC-06.
   (rgb/depth/normal/object_id/alpha + masks/manifest) comes back non-empty
   for every shot. That upload-once/render-six-times structure is what
   actually proves "no asset regeneration," not just an assertion in a
-  comment.
+  comment. `--usd` runs the same 6 shots through the USD path instead
+  (composes `scene.json` into a `.usda` stage via the render worker's own
+  `scene_usd.compose_usda()` and sends that as `sceneUsd` instead of flat
+  `scene`+`nodes` JSON) — see `runpod-3d-render-worker/src/scene_usd.py`.
 
 ## Running it
 
 ```sh
 pip install boto3 python-dotenv
 python3 run_golden_scene.py
+
+# USD -> Blender path (spec Appendix B Phase 0 DoD):
+pip install usd-core
+python3 run_golden_scene.py --usd
 ```
 
 Reads secrets from a `.env` at the repo root (auto-loaded via
@@ -53,10 +60,11 @@ per-shot pass/fail summary and the render worker's `renderTimeS` for each.
 Proves: scene compile, camera framing (6 distinct presets), all 5 render
 passes, DOF handling, non-destructive multi-shot reuse of one uploaded
 asset set — i.e. the render worker half of Phase 0's Definition of Done.
+Run with `--usd`, also proves the USD -> Blender round-trip: `scene.json`
+composed into a `.usda` stage, sent as `sceneUsd`, parsed back into the
+same nodes by the render worker's `scene_usd.py`, and rendered — same
+assertions, same 6 cameras, same assets.
 
-Doesn't prove: USD round-tripping (this fixture's `scene.json` is fed to
-the worker directly as flat JSON, same as the manual smoke tests so far —
-there's still no OpenUSD stage anywhere in the pipeline), browser preview
-loading, or anything about the asset-*generation* providers (TRELLIS.2/
-Hunyuan3D) — those are exercised by the separate provider bake-off, not
-this fixture.
+Doesn't prove: browser preview loading, or anything about the
+asset-*generation* providers (TRELLIS.2/Hunyuan3D) — those are exercised
+by the separate provider bake-off, not this fixture.
