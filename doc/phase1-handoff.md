@@ -6,6 +6,19 @@
 **Scope:** Phase 1 — MVP persistent 3D scene layer
 **Exit bar:** AC-01 through AC-12 (§26)
 
+**Update 2026-08-23:** the worker-contract gaps flagged in earlier versions
+of this doc (`outputPrefix`, error codes, reproducible manifests, lighting
+input, USD camera/lights/sparse-shot-layer, expected-subject QC,
+text-to-3D, ≥11-node golden scene) are now closed on the `3d-storystudio`
+side — see each endpoint's field table below and the `Error codes` rows,
+all updated in place rather than kept as a separate changelog. Two things
+are **not** done yet and block on this repo's own follow-up, not on you:
+(1) the render worker's rebuilt image needs its live RunPod endpoint's
+standby workers to cycle before these fields take effect against real
+traffic (image push ≠ instant rollout when `workersStandby > 0`); (2)
+text-to-3D (`input.prompt`) needs `QWEN_ENDPOINT_ID`/`RUNPOD_API_KEY` set
+on both asset-gpu endpoints, which hasn't been done yet either.
+
 ## How to use this document
 
 Phase 0 proved the render path works and picked a provider. It did **not**
@@ -36,7 +49,7 @@ Everything here lives in `3d-storystudio` and is live/verified as of
 | Object generation | Hunyuan3D 2.1 primary, TRELLIS.2 fallback — decided by a 25-image bake-off (geometry/texture tied 4.38/5 both; Hunyuan3D won on latency, ~2x faster at the median, and license fits current target markets) | RunPod endpoint `i703r1118k06ot` (Hunyuan3D), `rr133cjx94lkwt` (TRELLIS.2) |
 | Reference render | Headless Blender 4.5 LTS, Cycles (OptiX), produces RGB/depth/normal/object_id/alpha | RunPod endpoint `5cr41g9wtojd1t` |
 | USD scene composition | `compose_usda()` / `parse_usda()` — one Xform prim per scene node (translate/orient/scale ops + a custom `storystudio:assetUrl` reference attribute) under a `/World` default prim. Verified end-to-end: local round-trip against real fixture data, then a live 6-camera render through the actual RunPod endpoint | `runpod-3d-render-worker/src/scene_usd.py` |
-| Golden scene fixture | 9-node / 6-camera regression scene proving zero-asset-regeneration multi-shot reuse, exercised through both flat-JSON and USD input paths | `fixtures/3d/golden-scene/` |
+| Golden scene fixture | 11-node (env + 10 movable, AC-02-sized) / 6-camera regression scene proving zero-asset-regeneration multi-shot reuse, exercised through both flat-JSON and USD input paths | `fixtures/3d/golden-scene/` |
 | Render wire contract | Exact request/response JSON shape both workers accept — reuse verbatim in the Step Functions Lambda handlers rather than re-deriving it | see `runpod-3d-render-worker/README.md` and the render worker's `src/handler.py` |
 
 Phase 1's job is the layer **around** these two workers — persistence,
@@ -81,7 +94,8 @@ GPU pool: RTX 6000 Ada / L40S / RTX A6000 · `executionTimeoutMs: 600000`
 
 | `input` field | Required | Notes |
 |---|---|---|
-| `image_url` or `image_b64` | one of these | Isolated single-object shot — same input class TRELLIS.2 needs (see below) |
+| `image_url` or `image_b64` | one of these, or `prompt` | Isolated single-object shot — same input class TRELLIS.2 needs (see below) |
+| `prompt` | alternative to `image_url`/`image_b64` | Text-to-3D: this worker chains the existing Qwen image-gen endpoint synchronously (needs `QWEN_ENDPOINT_ID`+`RUNPOD_API_KEY` set on this endpoint), then runs the normal image-to-3D path. Optional `promptAspectRatio` (default `"1:1"`) passed through to Qwen. |
 | `quality` | no (default `"standard"`) | `"standard"` = shape + texture, `"shape_only"` = untextured mesh only |
 | `maxNumView` | no (default `6`) | Texture-pass view count; rarely needs overriding |
 | `paintResolution` | no (default `512`) | Texture-pass resolution; rarely needs overriding |
@@ -92,6 +106,7 @@ GPU pool: RTX 6000 Ada / L40S / RTX A6000 · `executionTimeoutMs: 600000`
 ```json
 // response (success)
 { "modelUrl": "https://.../model.glb",
+  "modelKey": "storystudio/models_3d/....glb",
   "provenance": { "provider": "hunyuan3d", "modelVersion": "Hunyuan3D-2.1",
                    "quality": "standard", "textured": true,
                    "sourceImageId": "img_123", "genTimeS": 104.2 },
@@ -99,12 +114,20 @@ GPU pool: RTX 6000 Ada / L40S / RTX A6000 · `executionTimeoutMs: 600000`
 ```
 `cold_start` is present (and `true`) only on the first job after a cold
 start — useful for excluding warm-up latency from p50/p95 metrics.
+`modelKey` (the raw R2 key) is additive alongside `modelUrl`. When
+`prompt` was used, `provenance.sourcePromptHash` (sha256 of the prompt)
+is set instead of `sourceImageId`.
 
-On failure: `{"error": "<message>", "traceback": "<python traceback>"}`.
-There's no fixed error-code taxonomy on the asset workers yet — Phase
-1's job wrapper should map these onto spec §24.1's codes
-(`3D_ASSET_PROVIDER_OOM`, `3D_ASSET_INVALID_GEOMETRY`, ...) rather than
-surface the raw Python message to the UI.
+On failure: `{"error": "<code>", "detail": "<message>", "traceback": "<python traceback>"}`.
+`error` is now always one of spec §24.1's codes (or an extension of that
+non-exhaustive list): `3D_ASSET_INVALID_INPUT` (missing image/prompt, or
+TRELLIS.2's no-foreground-subject case), `3D_ASSET_PROVIDER_OOM`,
+`3D_ASSET_INVALID_GEOMETRY` (byte-level post-export check — magic bytes,
+mesh/vertex counts, bounding-box extent — catches both the OBJ-mislabeled-
+as-glTF bug class and the char_kitten torn-sheet bug class before upload),
+`3D_ASSET_GENERATION_FAILED` (fallback, same raw message as before this
+taxonomy existed, now under `detail`). Map these directly — no more
+string-matching the raw Python message.
 
 #### Object generation — TRELLIS.2 (fallback)
 
@@ -113,7 +136,8 @@ GPU pool: A40 / RTX A6000 · `executionTimeoutMs: 600000`
 
 | `input` field | Required | Notes |
 |---|---|---|
-| `image_url` or `image_b64` | one of these | Same isolated-object requirement as Hunyuan3D |
+| `image_url` or `image_b64` | one of these, or `prompt` | Same isolated-object requirement as Hunyuan3D |
+| `prompt` | alternative to `image_url`/`image_b64` | Text-to-3D — same Qwen-chaining contract as Hunyuan3D above (`QWEN_ENDPOINT_ID`+`RUNPOD_API_KEY`, optional `promptAspectRatio`) |
 | `quality` | no (default `"standard"`) | `"draft"` \| `"standard"` \| `"high"` — **a different tiering scheme than Hunyuan3D** (decimation target + texture size, not a shape/texture toggle). Don't assume the two providers share a quality vocabulary at the API layer |
 | `seed` | no | Passed to `torch.manual_seed` |
 | `project_id`, `frame_id`, `output_key`, `sourceImageId` | no | Same as Hunyuan3D |
@@ -121,6 +145,7 @@ GPU pool: A40 / RTX A6000 · `executionTimeoutMs: 600000`
 ```json
 // response (success)
 { "modelUrl": "https://.../model.glb",
+  "modelKey": "storystudio/models_3d/....glb",
   "provenance": { "provider": "trellis2", "modelVersion": "TRELLIS.2-4B",
                    "quality": "standard", "seed": null,
                    "sourceImageId": "img_123", "genTimeS": 190.3 },
@@ -129,10 +154,13 @@ GPU pool: A40 / RTX A6000 · `executionTimeoutMs: 600000`
 
 Known input-validation case (fixed 2026-08-22): if RMBG-2.0 finds zero
 foreground pixels — e.g. a full-scene/interior image instead of an
-isolated single-object shot — this returns a clear
-`{"error": "TRELLIS.2 found no foreground subject in the input
-image..."}` rather than a crash. Treat this as a **user-facing input
-validation failure**, not a transient/retry-worthy error.
+isolated single-object shot — this returns
+`{"error": "3D_ASSET_INVALID_INPUT", "detail": "TRELLIS.2 found no
+foreground subject in the input image..."}` rather than a crash. Treat
+this as a **user-facing input validation failure**, not a transient/
+retry-worthy error. Same error-code contract as Hunyuan3D above (both
+workers share the same §24.1 mapping and `modelKey`/`sourcePromptHash`
+additions).
 
 #### Reference render — Blender worker
 
@@ -143,9 +171,13 @@ worker-side via `RENDER_TIMEOUT_S`)
 
 | `input` field | Required | Notes |
 |---|---|---|
-| `camera` | **yes** | `{focalLengthMm, translation:[x,y,z], lookAt:{"_worldPosition":[x,y,z]}` or `rotationQuat:[x,y,z,w], dof:{enabled, focusDistanceM}}` |
-| `scene` + `nodes` | one of these two scene-composition forms is required | `scene:{sceneId, upAxis, units}` plus `nodes:[{nodeId, assetUrl, transform:{translation, rotationQuat, scale}}, ...]` |
-| `sceneUsd` or `sceneUsdUrl` | (alternative to `scene`+`nodes`) | Raw `.usda` text, or a URL to fetch one — parsed via `scene_usd.py` into the identical node shape above. **Every `assetUrl` (flat or inside the USD's `storystudio:assetUrl` attributes) must be a publicly fetchable URL** — the worker downloads it directly with no auth, so assets need to be on R2 public, not S3 private, before rendering |
+| `camera` | **yes**, unless a Camera prim is present in `sceneUsd`/`shotUsd` | `{focalLengthMm, translation:[x,y,z], lookAt:{"_worldPosition":[x,y,z]}` or `rotationQuat:[x,y,z,w], dof:{enabled, focusDistanceM}}`. Malformed shapes are rejected with `3D_SHOT_CAMERA_INVALID` before Blender spawns. |
+| `scene` + `nodes` | one of these three scene-composition forms is required | `scene:{sceneId, upAxis, units}` plus `nodes:[{nodeId, assetUrl, transform:{translation, rotationQuat, scale}}, ...]` |
+| `sceneUsd` or `sceneUsdUrl` | (alternative to `scene`+`nodes`) | Raw `.usda` text, or a URL to fetch one — parsed via `scene_usd.py` into the identical node shape above, plus any authored Camera/UsdLux prims and per-node `semantic.role`/`forward`. **Every `assetUrl` (flat or inside the USD's `storystudio:assetUrl` attributes) must be a publicly fetchable URL** — the worker downloads it directly with no auth, so assets need to be on R2 public, not S3 private, before rendering |
+| `sceneUsd` + `shotUsd`/`shotUsdUrl` | (alternative to a single `sceneUsd`) | Base scene + a **sparse** shot override layer (spec §7.4/§17.1) — composed via real USD sublayering (`scene_usd.compose_shot_usda`/`parse_composed_stage`), not a hand-flattened merge. The shot layer's camera/transform/visibility opinions win. |
+| `lights` | no | `[{lightId, type: "sun"\|"point"\|"area", energy, color?, translation, rotationQuat}, ...]`. Omit (or a USD stage with no `/World/Lights`) falls back to the worker's existing flat default sun+fill — unchanged from Phase 0. |
+| `seed` | no (default `0`) | Cycles RNG seed, fixed (not per-job random) for AC-12 pixel-reproducibility |
+| `outputPrefix` | no | When set, every output lands at `{outputPrefix}/{passName}.{ext}` (e.g. `projects/{projectId}/3d/renders/{renderId}`) instead of this worker's flat internal namespace — **use this** instead of `keyFromWorkerUrl()`-style URL parsing now that it exists |
 | `passes` | no (default all 5) | `["rgb","depth","normal","object_id","alpha"]` |
 | `resolution` | no (default `{width:1920,height:1080}`) | |
 | `rendererEngine` | no (default `"CYCLES"`) | |
@@ -158,17 +190,32 @@ worker-side via `RENDER_TIMEOUT_S`)
   "outputs": { "rgb": "https://.../rgb.png", "depth": "https://.../depth.exr",
                "normal": "https://.../normal.exr", "object_id": "https://.../object_id.png",
                "alpha": "https://.../alpha.png", "masks": "https://.../masks.json",
-               "manifest": "https://.../manifest.json" } }
+               "manifest": "https://.../manifest.json" },
+  "outputKeys": { "rgb": "projects/.../renders/rnd_879/rgb.png", "...": "..." } }
 ```
+`outputKeys` (raw R2 keys, same key set as `outputs`) is additive —
+existing code reading only `outputs` is unaffected. `manifest.json` now
+embeds the full reproducible input set (`scene`, `nodes`, `camera`,
+`lights`, `rendererEngine`, `samples`, `seed`) plus a sha256
+`contentHash`, per AC-12. `masks.json` now documents its contract
+explicitly: `{"background": 0, "nodes": [{"nodeId","name","type","passIndex"}, ...]}`
+— `passIndex` is exactly the `object_id.png` pixel value for that node.
 
-This is the one worker that already uses spec §24.1's real error codes —
-propagate them as-is rather than re-mapping:
+This worker uses spec §24.1's real error codes — propagate them as-is
+rather than re-mapping:
 
 | `error` | Meaning |
 |---|---|
-| `3D_SCENE_REFERENCE_NOT_FOUND` | Missing `camera`, or no usable scene composition (`scene`/`nodes` empty and no `sceneUsd`/`sceneUsdUrl`) |
+| `3D_SCENE_REFERENCE_NOT_FOUND` | Missing `camera` (and no Camera prim in the USD input), or no usable scene composition |
+| `3D_SHOT_CAMERA_INVALID` | `camera` present but malformed — rejected before Blender spawns |
 | `3D_RENDER_WORKER_FAILED` | Blender subprocess exited nonzero, or exceeded the render timeout |
 | `3D_RENDER_EMPTY_FRAME` | Blender exited 0 but produced no `rgb.png` — response includes `stdout`/`stderr` for diagnosis; see Part 2.4's bug 3 for why this check exists |
+| `3D_RENDER_NO_SUBJECT` | Blender exited 0 and wrote a non-empty `rgb.png`, but nothing is actually visible (spec §20.3) — new QC check, distinct from `3D_RENDER_EMPTY_FRAME` |
+
+**Webhook passthrough** (all three endpoints, no code involved): pass a
+top-level `"webhook": "https://..."` alongside `"input"` in the `/run`
+request body — RunPod calls it with the same `{status, output}` shape
+`/status/{jobId}` returns, once the job reaches a terminal state.
 
 **Capacity note:** all three endpoints currently scale to a small worker
 cap (`workersMax` 2/4/2). Phase 1 traffic beyond that queues rather than
@@ -335,7 +382,14 @@ branch.
 ### 1.5 Asset normalization & USD authoring (spec §9.1, §17.1)
 
 The one piece of core 3D logic still owed beyond the two GPU workers
-already running.
+already running. **Update 2026-08-23: the USD scene/shot authoring half
+is now done** (`scene_usd.py` extended with camera/light/semantic
+authoring plus a real sparse `shot.usda` sublayer implementation — see
+Part 0 and the render worker README for the exact API). **The
+normalization pipeline (10 steps below) is still fully unbuilt** — it's
+an `asset-cpu` service (or Step Functions stage) this repo has no
+presence for at all, distinct from the two `asset-gpu` generation workers
+and the `blender-render` worker.
 
 **Normalization pipeline (§9.1):**
 1. Download generated/uploaded source into isolated worker storage
@@ -349,13 +403,23 @@ already running.
 9. Generate canonical GLB and optional USD representation
 10. Write immutable manifest and content hashes
 
-**USD scene/shot authoring:** extend `scene_usd.py`'s pattern (already
-proven end-to-end in Phase 0 — see Part 0) from single-scene Xform +
-reference composition to full assembly per spec §17.1's layout: a base
-`scene.usda` plus a **sparse** `shot.usda` override layer per shot,
-rather than flattening every shot into a full scene copy. This is what
-spec §10 means by shots storing only camera selection, transform
-overrides, and visibility/lighting tweaks, not a whole-scene duplicate.
+**USD scene/shot authoring — done 2026-08-23:** `scene_usd.py` now
+authors/parses Camera and UsdLux prims, per-node `semantic.role`/
+`forward`, and a real sparse `shot.usda` override layer via USD
+sublayering (`compose_shot_usda`/`parse_composed_stage` — `OverridePrim`,
+not a hand-flattened merge), matching spec §17.1's `scene.usda` + sparse
+`shot.usda` layout. This is what spec §10 means by shots storing only
+camera selection, transform overrides, and visibility/lighting tweaks,
+not a whole-scene duplicate. The render worker's `handler.py` accepts
+`sceneUsd`+`shotUsd`/`shotUsdUrl` together as a third scene-composition
+input alongside flat JSON and single-stage USD — see the render worker
+README for the exact contract and a worked example. Reuse this module
+directly (or its composition pattern) rather than re-implementing shot
+layering — it's the one piece of this section that's now fully proven,
+including the non-obvious fact that USD's stage-level metadata (upAxis/
+metersPerUnit) needs re-stamping on the shot layer's root since it does
+not resolve through sublayers the way prim-level opinions do (documented
+in `compose_shot_usda`'s docstring).
 
 **Storage layout (§17.1):**
 ```
@@ -392,7 +456,7 @@ it; public R2 holds only delivery-safe previews and approved artifacts.
 | ID | Criterion | What actually proves it |
 |---|---|---|
 | AC-01 | Import or generate a GLB asset, see it in the viewport | Round-trip through `/assets/import` + `/assets/generate`; confirm the viewport GLB's hash matches the manifest |
-| AC-02 | Scene holds an environment + 10 independently movable instances | Extend the golden-scene fixture past 9 nodes; each node selectable/transformable in isolation |
+| AC-02 | Scene holds an environment + 10 independently movable instances | `fixtures/3d/golden-scene/` is now 11 nodes (env + 10 movable) — each node selectable/transformable in isolation. Fixture-side work is done; Part A still needs to prove this through the real `/v1/3d/*` API + viewport, not just the render worker |
 | AC-03 | Move/rotate/scale persist as reproducible scene revisions | Transform → reload the scene at that revision → transform values come back byte-identical |
 | AC-04 | Same base scene → 6 distinct camera shots, zero asset regeneration | The golden-scene check already passing in `3d-storystudio`, re-run through the real `/v1/3d/*` API instead of calling the render worker directly |
 | AC-05 | Render job produces RGB, depth, object ID/mask, camera metadata | Assert non-empty, format-valid bytes per §2.3 — not just HTTP 200 (see §2.4) |
