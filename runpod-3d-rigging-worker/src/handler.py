@@ -145,21 +145,24 @@ def validate_rigged_glb(data: bytes) -> Dict[str, Any]:
     if not joint_indices:
         raise GeometryValidationError("rigged GLB's skin has zero joints")
     joint_names = [nodes[j].get("name", f"joint_{j}") for j in joint_indices if j < len(nodes)]
-    return {"jointCount": len(joint_indices), "jointNames": joint_names}
+    return {
+        "jointCount": len(joint_indices),
+        "jointNames": joint_names,
+        "_gltf": gltf,
+        "_skin": skins[0],
+    }
 
 
-# Heuristic, not a confirmed taxonomy: the recommended checkpoint
-# (articulation_xl_quantization_256_token_4) is trained on the broad,
-# non-humanoid-only ArticulationXL2.0 dataset, not one of the fixed
-# Mixamo/VRoid bone-name schemes shipped in configs/skeleton/ for a
-# different, constrained mode -- so the actual joint-naming convention
-# this model predicts hasn't been confirmed against real inference output
-# yet. This matches common naming families (Mixamo-style "LeftHand",
-# VRoid-style "J_Bip_L_Hand", or plain "hand_l") via loose substring
-# matching on a normalized (lowercased, separators stripped) name, so it
-# degrades gracefully (fewer anchors filled in) rather than crashing on an
-# unexpected scheme. Revisit once real output is inspected -- see
-# README.md's verification-status note.
+# Name-based matching kept as a cheap fallback/supplement, but confirmed
+# NOT useful against the actual deployed checkpoint
+# (articulation_xl_quantization_256_token_4): a real live job (giraffe.glb,
+# 67 joints) came back with every joint named "bone_0".."bone_66" -- pure
+# autoregressive index placeholders, not semantic labels. This model
+# predicts skeleton *topology* (positions + parent/child structure) via
+# Skeleton Tree Tokenization, not a joint classifier, so there is no
+# semantic name anywhere in this pipeline to match against. Geometric
+# inference (below) is the real mechanism; this only helps if some future
+# checkpoint/asset happens to carry real names.
 _ANCHOR_PATTERNS: Dict[str, List[str]] = {
     "head":       ["head"],
     "left_hand":  ["lefthand", "handleft", "hand_l", "l_hand"],
@@ -179,6 +182,145 @@ def map_semantic_anchors(joint_names: List[str]) -> Dict[str, str]:
                 continue
             if any(p in normalized for p in patterns):
                 anchors[anchor] = name
+    return anchors
+
+
+# ---- Geometric anchor inference -----------------------------------------
+# Since joint names carry no semantics (see above), anchors are inferred
+# from the skeleton's own geometry: each joint's world-space position
+# (accumulated by walking the glTF node hierarchy's local TRS transforms
+# from the scene root down to each joint) plus its topology (parent/child
+# structure within the skin). Deliberately stdlib-only -- plain Python
+# lists for 4x4 matrices, no numpy -- matching this repo's other workers'
+# "no new dependency for a stdlib-sized problem" convention.
+#
+# Honesty limit: this can identify `root` (topologically) and a
+# reasonable `head` guess (highest leaf joint), but NOT left/right --
+# telling a character's own left paw from its right purely from joint
+# positions needs a facing/forward-direction signal (spec §8.2's
+# `semantic.forward`) that lives on the *scene node* wrapping this asset,
+# not inside the isolated rigged mesh this worker produces. Instead of
+# shipping a coin-flip left/right label, `extremities` returns every
+# non-head leaf joint's name + position + distance from root, ranked, so
+# a caller with the forward vector (or a human) can assign left/right
+# correctly downstream.
+
+def _quat_to_rotation_matrix(q: List[float]) -> List[List[float]]:
+    x, y, z, w = q
+    xx, yy, zz = x * x, y * y, z * z
+    xy, xz, yz = x * y, x * z, y * z
+    wx, wy, wz = w * x, w * y, w * z
+    return [
+        [1 - 2 * (yy + zz), 2 * (xy - wz), 2 * (xz + wy)],
+        [2 * (xy + wz), 1 - 2 * (xx + zz), 2 * (yz - wx)],
+        [2 * (xz - wy), 2 * (yz + wx), 1 - 2 * (xx + yy)],
+    ]
+
+
+def _local_matrix(node: Dict[str, Any]) -> List[List[float]]:
+    """4x4 row-major local transform from a glTF node's explicit `matrix`
+    (glTF stores this column-major) or its translation/rotation/scale."""
+    if "matrix" in node:
+        raw = node["matrix"]
+        return [[raw[c * 4 + r] for c in range(4)] for r in range(4)]
+    t = node.get("translation", [0.0, 0.0, 0.0])
+    q = node.get("rotation", [0.0, 0.0, 0.0, 1.0])  # glTF order [x,y,z,w]
+    s = node.get("scale", [1.0, 1.0, 1.0])
+    rot = _quat_to_rotation_matrix(q)
+    m = [[0.0] * 4 for _ in range(4)]
+    for i in range(3):
+        for j in range(3):
+            m[i][j] = rot[i][j] * s[j]
+        m[i][3] = t[i]
+    m[3] = [0.0, 0.0, 0.0, 1.0]
+    return m
+
+
+def _mat_mul(a: List[List[float]], b: List[List[float]]) -> List[List[float]]:
+    return [[sum(a[i][k] * b[k][j] for k in range(4)) for j in range(4)] for i in range(4)]
+
+
+def _joint_world_positions(nodes: List[Dict[str, Any]], joint_indices: List[int]) -> Dict[int, List[float]]:
+    parent_of_node: Dict[int, int] = {}
+    for i, node in enumerate(nodes):
+        for c in node.get("children", []):
+            parent_of_node[c] = i
+
+    world_cache: Dict[int, List[List[float]]] = {}
+
+    def world_matrix(idx: int) -> List[List[float]]:
+        if idx not in world_cache:
+            local = _local_matrix(nodes[idx])
+            parent = parent_of_node.get(idx)
+            world_cache[idx] = _mat_mul(world_matrix(parent), local) if parent is not None else local
+        return world_cache[idx]
+
+    return {j: [world_matrix(j)[0][3], world_matrix(j)[1][3], world_matrix(j)[2][3]] for j in joint_indices}
+
+
+def infer_geometric_anchors(gltf: Dict[str, Any], skin: Dict[str, Any]) -> Dict[str, Any]:
+    nodes = gltf.get("nodes", [])
+    joint_indices = skin.get("joints", [])
+    if not joint_indices:
+        return {}
+
+    parent_of_node: Dict[int, int] = {}
+    for i, node in enumerate(nodes):
+        for c in node.get("children", []):
+            parent_of_node[c] = i
+
+    joint_set = set(joint_indices)
+    skin_parent: Dict[int, Optional[int]] = {}
+    child_count: Dict[int, int] = {j: 0 for j in joint_indices}
+    for j in joint_indices:
+        p = parent_of_node.get(j)
+        while p is not None and p not in joint_set:
+            p = parent_of_node.get(p)
+        skin_parent[j] = p
+        if p is not None:
+            child_count[p] = child_count.get(p, 0) + 1
+
+    skeleton_hint = skin.get("skeleton")
+    roots = [j for j in joint_indices if skin_parent.get(j) is None]
+    if skeleton_hint in joint_set:
+        root = skeleton_hint
+    elif roots:
+        root = roots[0]
+    else:
+        root = joint_indices[0]
+
+    positions = _joint_world_positions(nodes, joint_indices)
+    root_pos = positions[root]
+
+    def dist_from_root(j: int) -> float:
+        p = positions[j]
+        return sum((p[k] - root_pos[k]) ** 2 for k in range(3)) ** 0.5
+
+    leaves = [j for j in joint_indices if child_count.get(j, 0) == 0 and j != root]
+    # glTF's canonical up-axis is Y -- this is the exporter's own
+    # coordinate space, independent of StoryStudio's Z-up scene
+    # convention (that conversion, if needed, happens downstream).
+    head = max(leaves, key=lambda j: positions[j][1]) if leaves else None
+
+    def joint_name(j: int) -> str:
+        return nodes[j].get("name", f"joint_{j}")
+
+    anchors: Dict[str, Any] = {"root": joint_name(root)}
+    if head is not None:
+        anchors["head"] = joint_name(head)
+
+    extremities = [
+        {
+            "jointName": joint_name(j),
+            "position": [round(v, 5) for v in positions[j]],
+            "distanceFromRoot": round(dist_from_root(j), 5),
+        }
+        for j in leaves if j != head
+    ]
+    extremities.sort(key=lambda e: -e["distanceFromRoot"])
+    if extremities:
+        anchors["extremities"] = extremities
+
     return anchors
 
 
@@ -231,7 +373,14 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             glb_bytes = output_path.read_bytes()
 
         skeleton_info = validate_rigged_glb(glb_bytes)
+        gltf, skin = skeleton_info.pop("_gltf"), skeleton_info.pop("_skin")
+
+        # Name-based matching first (cheap; wins if a future checkpoint
+        # ever emits real semantic names), geometric fills in whatever
+        # name-based didn't find (root/head always; extremities always).
         anchors = map_semantic_anchors(skeleton_info["jointNames"])
+        for anchor_key, value in infer_geometric_anchors(gltf, skin).items():
+            anchors.setdefault(anchor_key, value)
 
         key = inp.get("output_key") or build_asset_key(
             "models_3d_rigged", "rig_generate", "glb",
