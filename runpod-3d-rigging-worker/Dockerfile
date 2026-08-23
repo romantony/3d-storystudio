@@ -30,9 +30,20 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 WORKDIR /workspace
 
+# The first real build's live test failed with bpy_server.py (the
+# background subprocess doing all mesh import/export via `bpy`) never
+# coming up -- confirmed via a live job's ConnectionRefusedError on its
+# localhost port, not a timing issue (60s is generous for a bottle HTTP
+# server). `bpy`'s compiled extension needs real X11/GL client libs even
+# for headless mesh-only operations, not just when actually rendering --
+# this repo's hunyuan3d/Dockerfile already hit and solved the identical
+# class of problem for its own bpy usage; matching that proven library
+# set here rather than the thinner one this Dockerfile started with.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential git wget cmake ninja-build \
         libglib2.0-0 libsm6 libxext6 libxrender1 libgl1 \
+        libxi6 libxkbcommon-x11-0 libxrender-dev libxfixes3 libxxf86vm1 \
+        libgl1-mesa-dev libegl1-mesa-dev libglvnd0 libglvnd-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # bpy>=4.2 has no PyPI wheel below cp311 (confirmed the same way for the
