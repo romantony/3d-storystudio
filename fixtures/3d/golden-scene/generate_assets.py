@@ -54,6 +54,8 @@ ASSETS = {
     "prop_cone_purple":    lambda: color(ground_to_zero(trimesh.creation.cone(radius=0.25, height=0.50, sections=32)), (128, 78, 168)),
     "prop_capsule_orange": lambda: color(ground_to_zero(trimesh.creation.capsule(radius=0.15, height=0.35)), (222, 128, 44)),
     "prop_pyramid_pink":   lambda: color(pyramid(base=0.4, height=0.5), (208, 96, 150)),
+    "prop_cube_teal_small": lambda: color(ground_to_zero(trimesh.creation.box([0.22, 0.22, 0.22])), (36, 140, 132)),
+    "prop_sphere_gold":    lambda: color(ground_to_zero(trimesh.creation.icosphere(radius=0.18, subdivisions=3)), (196, 158, 40)),
     "env_ground_plane":    lambda: color(trimesh.creation.box([8, 8, 0.05]).apply_translation([0, 0, -0.025]), (120, 120, 112)),
 }
 

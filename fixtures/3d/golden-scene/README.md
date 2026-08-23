@@ -9,8 +9,9 @@ This fixture is the concrete test for that line, and for AC-04/AC-05/AC-06.
 
 ## What's here
 
-- `scene.json` — one environment (ground plane) + 8 movable props, 9 nodes
-  total. Every prop's mesh origin is baked to its ground-contact point
+- `scene.json` — one environment (ground plane) + 10 movable props, 11 nodes
+  total (spec AC-02: "environment + 10 independently movable instances").
+  Every prop's mesh origin is baked to its ground-contact point
   (footprint center at local z=0) per spec §7.2, so grounded nodes carry
   `translation.z = 0`.
 - `cameras/*.json` — 6 shots covering the spec §10.2 preset vocabulary that
@@ -18,13 +19,13 @@ This fixture is the concrete test for that line, and for AC-04/AC-05/AC-06.
   medium, close-up (with DOF), low angle, high angle/top-down.
   Over-the-shoulder/POV are skipped here — they need a rigged character
   anchor, which is explicitly Phase 2 (spec §19).
-- `assets/*.glb` — 9 procedurally generated primitives (cube/sphere/
+- `assets/*.glb` — 11 procedurally generated primitives (cube/sphere/
   cylinder/cone/capsule/pyramid + ground plane), not sourced/downloaded CC0
   assets. This fixture exists to regression-test the render worker's scene
   compile + camera + pass pipeline, not asset quality — procedural geometry
   gets that with zero external downloads and zero licensing questions.
   Regenerate with `generate_assets.py` if you need to tweak the scene.
-- `run_golden_scene.py` — uploads the 9 GLBs to R2 **once**, then fires all
+- `run_golden_scene.py` — uploads the 11 GLBs to R2 **once**, then fires all
   6 shots against that same upload and asserts every requested pass
   (rgb/depth/normal/object_id/alpha + masks/manifest) comes back non-empty
   for every shot. That upload-once/render-six-times structure is what
