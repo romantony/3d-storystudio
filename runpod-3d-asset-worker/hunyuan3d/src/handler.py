@@ -1,14 +1,17 @@
 import base64
+import hashlib
 import io
+import json
 import logging
 import os
+import struct
 import sys
 import tempfile
 import time
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import boto3
 import runpod
@@ -32,6 +35,17 @@ R2_ACCESS_KEY_ID     = os.environ["R2_ACCESS_KEY_ID"]
 R2_SECRET_ACCESS_KEY = os.environ["R2_SECRET_ACCESS_KEY"]
 R2_BUCKET_NAME       = os.environ.get("R2_BUCKET_NAME", "e2e-storystudio")
 R2_PUBLIC_URL        = os.environ.get("R2_PUBLIC_URL", "")
+
+# Text-to-3D (input.prompt): this worker only ever does image-to-3D itself
+# -- a prompt is resolved to an image by calling the existing Qwen
+# image-gen RunPod endpoint synchronously, then the normal image_url path
+# runs unchanged. Both are optional; a prompt-only request without these
+# configured fails with a clear 3D_ASSET_INVALID_INPUT rather than a
+# missing-env-var KeyError.
+QWEN_ENDPOINT_ID = os.environ.get("QWEN_ENDPOINT_ID")
+RUNPOD_API_KEY   = os.environ.get("RUNPOD_API_KEY")
+QWEN_POLL_INTERVAL_S = 5
+QWEN_POLL_TIMEOUT_S = 300  # leaves headroom under executionTimeoutMs (600s) for the actual 3D generation
 
 # README-documented default (Hunyuan3DPaintConfig(max_num_view=6,
 # resolution=512)). Per-tier overrides aren't in the documented API — confirm
@@ -85,6 +99,149 @@ def fetch_image_to_file(src: str, dest_path: Path) -> None:
     else:
         data = base64.b64decode(src)
     Image.open(io.BytesIO(data)).convert("RGB").save(dest_path, format="PNG")
+
+
+class InputValidationError(ValueError):
+    """Bad/missing request input -- maps to 3D_ASSET_INVALID_INPUT, an
+    extension of spec §24.1's (non-exhaustive, per its own heading) error
+    code list -- not a provider/geometry failure."""
+
+
+class GeometryValidationError(ValueError):
+    """Maps to spec §24.1's 3D_ASSET_INVALID_GEOMETRY."""
+
+
+def validate_glb_bytes(data: bytes) -> None:
+    """Byte-level glTF geometry sanity check, deliberately stdlib-only
+    (struct+json, no trimesh/pymeshlab load) so it adds no new dependency
+    and can't itself crash/OOM on a huge mesh. Catches both real failure
+    shapes this worker hit and shipped for weeks before anyone noticed by
+    eye: (1) a non-glTF file uploaded with a glTF content-type -- the
+    exact OBJ/GLB mislabeling bug _export_mesh() below now works around,
+    caught here as defense in depth -- and (2) a structurally-valid-but-
+    degenerate mesh (the char_kitten torn-sheet bug from the provider
+    bake-off: job reports COMPLETED with a populated URL, but the
+    geometry itself is a near-empty sheet)."""
+    if len(data) < 20 or data[:4] != b"glTF":
+        raise GeometryValidationError("output is not a valid GLB (bad magic bytes)")
+    _version, total_length = struct.unpack_from("<II", data, 4)
+    if total_length > len(data):
+        raise GeometryValidationError("GLB header length exceeds actual file size (truncated upload)")
+
+    chunk_length, chunk_type = struct.unpack_from("<I4s", data, 12)
+    if chunk_type != b"JSON":
+        raise GeometryValidationError("GLB's first chunk is not JSON")
+    try:
+        gltf = json.loads(data[20:20 + chunk_length])
+    except json.JSONDecodeError as exc:
+        raise GeometryValidationError(f"GLB JSON chunk is not valid JSON: {exc}") from exc
+
+    meshes = gltf.get("meshes", [])
+    if not meshes:
+        raise GeometryValidationError("GLB has zero meshes")
+
+    accessors = gltf.get("accessors", [])
+    total_vertices = 0
+    min_bound: Optional[List[float]] = None
+    max_bound: Optional[List[float]] = None
+    for mesh in meshes:
+        for prim in mesh.get("primitives", []):
+            pos_idx = prim.get("attributes", {}).get("POSITION")
+            if pos_idx is None or pos_idx >= len(accessors):
+                continue
+            acc = accessors[pos_idx]
+            total_vertices += acc.get("count", 0)
+            acc_min, acc_max = acc.get("min"), acc.get("max")
+            if acc_min and acc_max:
+                min_bound = acc_min if min_bound is None else [min(a, b) for a, b in zip(min_bound, acc_min)]
+                max_bound = acc_max if max_bound is None else [max(a, b) for a, b in zip(max_bound, acc_max)]
+
+    if total_vertices < 4:
+        raise GeometryValidationError(f"GLB has too few vertices ({total_vertices}) to be a real mesh")
+    if min_bound and max_bound and max(hi - lo for lo, hi in zip(min_bound, max_bound)) < 1e-6:
+        raise GeometryValidationError("GLB geometry bounding box is degenerate (near-zero extent)")
+
+
+def classify_error(exc: Exception) -> str:
+    """Spec §24.1 error code mapping. This worker previously returned raw
+    {error: str(exc), traceback} for everything -- per doc/phase1-handoff.md,
+    Phase 1's job wrapper was left to guess this mapping from the raw
+    Python message. OOM detection is text-based (rather than
+    isinstance(exc, torch.cuda.OutOfMemoryError)) since this handler
+    doesn't import torch directly and OOMs can surface wrapped in a
+    RuntimeError from deep inside a pipeline call anyway."""
+    if isinstance(exc, InputValidationError):
+        return "3D_ASSET_INVALID_INPUT"
+    if isinstance(exc, GeometryValidationError):
+        return "3D_ASSET_INVALID_GEOMETRY"
+    text = str(exc).lower()
+    if "out of memory" in text or "cuda oom" in text:
+        return "3D_ASSET_PROVIDER_OOM"
+    return "3D_ASSET_GENERATION_FAILED"
+
+
+def _runpod_request(endpoint_id: str, path: str, method: str = "GET",
+                     body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    url = f"https://api.runpod.ai/v2/{endpoint_id}{path}"
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        url, data=data, method=method,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {RUNPOD_API_KEY}"},
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.loads(resp.read())
+
+
+def _extract_qwen_image_url(output: Dict[str, Any]) -> str:
+    """Qwen's exact output field name isn't a documented contract here
+    (that worker lives in a different repo) -- try the common shapes and
+    fail loudly with the raw payload rather than guessing silently. Same
+    logic as fixtures/3d/pipeline-smoke-test/run_full_pipeline_test.py's
+    extract_image_url(), which confirmed this against real Qwen output."""
+    for key in ("imageUrl", "image_url", "url", "output_url"):
+        if isinstance(output.get(key), str):
+            return output[key]
+    images = output.get("images")
+    if isinstance(images, list) and images:
+        if isinstance(images[0], str):
+            return images[0]
+        if isinstance(images[0], dict):
+            for key in ("url", "imageUrl", "image_url"):
+                if key in images[0]:
+                    return images[0][key]
+    raise InputValidationError(f"Qwen image-gen returned no recognizable image URL: {json.dumps(output)[:500]}")
+
+
+def generate_image_url_from_prompt(prompt: str, project_id: Optional[str], frame_id: Optional[str],
+                                    aspect_ratio: str) -> str:
+    """input.prompt (text-to-3D): chains the existing Qwen image-gen
+    RunPod endpoint synchronously ahead of this worker's own image-to-3D
+    pipeline -- same three-endpoint chain
+    fixtures/3d/pipeline-smoke-test/run_full_pipeline_test.py already
+    proved works end-to-end, just done in-worker so a caller can submit
+    one job instead of orchestrating three themselves."""
+    if not QWEN_ENDPOINT_ID or not RUNPOD_API_KEY:
+        raise InputValidationError(
+            "input.prompt (text-to-3D) requires QWEN_ENDPOINT_ID and RUNPOD_API_KEY to be configured "
+            "on this endpoint -- this worker chains Qwen image-gen -> image-to-3D internally rather "
+            "than generating 3D directly from text."
+        )
+    LOGGER.info("Resolving input.prompt via Qwen text-to-image: %.70s...", prompt)
+    submitted = _runpod_request(QWEN_ENDPOINT_ID, "/run", method="POST", body={
+        "input": {"model": "qwen", "prompt": prompt, "aspect_ratio": aspect_ratio,
+                   "project_id": project_id, "frame_id": frame_id}
+    })
+    job_id = submitted["id"]
+    deadline = time.time() + QWEN_POLL_TIMEOUT_S
+    while time.time() < deadline:
+        result = _runpod_request(QWEN_ENDPOINT_ID, f"/status/{job_id}")
+        status = result.get("status")
+        if status == "COMPLETED":
+            return _extract_qwen_image_url(result.get("output", {}))
+        if status == "FAILED":
+            raise InputValidationError(f"Qwen image-gen job failed: {result.get('output')}")
+        time.sleep(QWEN_POLL_INTERVAL_S)
+    raise InputValidationError(f"Qwen image-gen job {job_id} did not finish within {QWEN_POLL_TIMEOUT_S}s")
 
 
 def get_shape_pipeline():
@@ -156,8 +313,14 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         inp: Dict[str, Any] = job.get("input", {})
 
         image_src = inp.get("image_url") or inp.get("image_b64")
+        prompt = inp.get("prompt")
+        if not image_src and not prompt:
+            return {"error": "3D_ASSET_INVALID_INPUT",
+                    "detail": "input.image_url, input.image_b64, or input.prompt is required"}
         if not image_src:
-            return {"error": "input.image_url or input.image_b64 is required"}
+            image_src = generate_image_url_from_prompt(
+                prompt, inp.get("project_id"), inp.get("frame_id"), inp.get("promptAspectRatio", "1:1"),
+            )
 
         quality = inp.get("quality", "standard")  # "shape_only" | "standard" (shape+texture)
         max_num_view = int(inp.get("maxNumView", DEFAULT_MAX_NUM_VIEW))
@@ -184,6 +347,12 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
 
             glb_bytes = Path(final_path).read_bytes()
 
+        # Spec §20.3-equivalent QC for asset generation: defense in depth
+        # alongside _export_mesh()'s own OBJ/GLB-sibling fix above, and the
+        # actual catch for the char_kitten-class failure (mesh exports
+        # clean, geometry itself is garbage) that _export_mesh() can't see.
+        validate_glb_bytes(glb_bytes)
+
         gen_time_s = round(time.time() - t0, 1)
         LOGGER.info("Generation completed in %.1fs (textured=%s)", gen_time_s, textured)
 
@@ -193,16 +362,21 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         )
         model_url = upload_bytes(glb_bytes, key, "model/gltf-binary")
 
+        provenance: Dict[str, Any] = {
+            "provider": "hunyuan3d",
+            "modelVersion": "Hunyuan3D-2.1",
+            "quality": quality,
+            "textured": textured,
+            "sourceImageId": inp.get("sourceImageId"),
+            "genTimeS": gen_time_s,
+        }
+        if prompt:
+            provenance["sourcePromptHash"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
         output: Dict[str, Any] = {
             "modelUrl": model_url,
-            "provenance": {
-                "provider": "hunyuan3d",
-                "modelVersion": "Hunyuan3D-2.1",
-                "quality": quality,
-                "textured": textured,
-                "sourceImageId": inp.get("sourceImageId"),
-                "genTimeS": gen_time_s,
-            },
+            "modelKey": key,
+            "provenance": provenance,
         }
         if cold_start:
             output["cold_start"] = True
@@ -211,7 +385,7 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
 
     except Exception as exc:
         LOGGER.error("%s", exc, exc_info=True)
-        return {"error": str(exc), "traceback": __import__("traceback").format_exc()}
+        return {"error": classify_error(exc), "detail": str(exc), "traceback": __import__("traceback").format_exc()}
 
 
 runpod.serverless.start({"handler": handler})

@@ -89,12 +89,51 @@ POST /run
 `decimation_target`/`texture_size`. `shape_only` | `standard` (hunyuan3d) —
 `shape_only` skips the texture pass entirely (10GB VRAM vs 29GB combined).
 
+### Text-to-3D: `input.prompt`
+
+`image_url`/`image_b64` can be replaced with `input.prompt` (a text
+description). Neither handler generates 3D directly from text — both
+chain the existing Qwen image-gen RunPod endpoint synchronously (same
+prompt -> image -> 3D chain already proven end-to-end in
+[`fixtures/3d/pipeline-smoke-test/`](../fixtures/3d/pipeline-smoke-test/))
+before running their normal image-to-3D pipeline unchanged. Requires
+`QWEN_ENDPOINT_ID` and `RUNPOD_API_KEY` to be set on the endpoint; without
+them a prompt-only request fails fast with `3D_ASSET_INVALID_INPUT`
+rather than an opaque missing-env-var error. Optional `promptAspectRatio`
+(default `"1:1"`) is passed through to Qwen. `provenance.sourcePromptHash`
+(sha256 of the prompt, spec §21.3's field name) is set instead of
+`sourceImageId` when this path is used.
+
 ```json
 {"modelUrl": "https://pub-xxx.r2.dev/storystudio/models_3d/prj_hero_puppy_storm_drain_01_asset_generate.glb",
+ "modelKey": "storystudio/models_3d/prj_hero_puppy_storm_drain_01_asset_generate.glb",
  "provenance": {"provider": "trellis2", "modelVersion": "TRELLIS.2-4B", "quality": "standard", "seed": 19203, "genTimeS": 21.4}}
 ```
 
-Errors follow the shared shape: `{"error": "...", "traceback": "..."}`.
+`modelKey` (the raw R2 object key) is additive alongside `modelUrl` —
+callers that need to persist the key without re-deriving it from the URL
+can read it directly.
+
+### Error codes (spec §24.1, extended)
+
+```json
+{"error": "3D_ASSET_INVALID_GEOMETRY", "detail": "GLB has too few vertices (3) to be a real mesh", "traceback": "..."}
+```
+
+| Code | Meaning |
+|---|---|
+| `3D_ASSET_INVALID_INPUT` | Missing `image_url`/`image_b64`/`prompt`, or (trellis2) an input image with no detectable foreground subject. Extension beyond §24.1's listed examples — the spec's own heading calls that list non-exhaustive. |
+| `3D_ASSET_PROVIDER_OOM` | CUDA out-of-memory during generation |
+| `3D_ASSET_INVALID_GEOMETRY` | Byte-level post-export check (magic bytes, mesh/vertex count, bounding-box extent) failed — catches both the OBJ-mislabeled-as-GLB bug class and the "reports success, ships a degenerate mesh" bug class (char_kitten from the provider bake-off) before upload, instead of relying on the render worker or a human to notice downstream |
+| `3D_ASSET_GENERATION_FAILED` | Anything else — `detail`/`traceback` carry the raw message, same as before this taxonomy existed |
+
+Previously every failure returned `{"error": "<raw Python message>", "traceback": "..."}` with no code at all — `error` is now always one of the codes above, with the original message moved to `detail`.
+
+### Webhook passthrough
+
+No code changes needed here either — RunPod's job-submission API accepts
+a top-level `webhook` URL alongside `input`; see the render worker's
+README for the exact shape, identical on these endpoints.
 
 ## Build
 
