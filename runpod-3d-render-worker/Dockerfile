@@ -1,4 +1,4 @@
-# blender-render — headless Blender 4.5 LTS scene compile + deterministic
+# blender-render — headless Blender 5.2 LTS scene compile + deterministic
 # reference render. No CUDA extensions to compile here (Blender ships its
 # own CUDA/OptiX kernels internally), so this stays on the *runtime* CUDA
 # image and installs fast compared to the asset-gpu images.
@@ -20,11 +20,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 
-# Blender 4.5 is the current LTS (blender.org/download/lts) — pin the patch,
+# Blender 5.2 is the current LTS (blender.org/download/lts) — pin the patch,
 # don't float it; render output must stay reproducible across cold starts
 # per spec NFR-01 (renders record exact renderer version).
-ARG BLENDER_VERSION=4.5.12
-RUN wget -q "https://download.blender.org/release/Blender4.5/blender-${BLENDER_VERSION}-linux-x64.tar.xz" -O /tmp/blender.tar.xz \
+ARG BLENDER_VERSION=5.2.3
+RUN wget -q "https://download.blender.org/release/Blender5.2/blender-${BLENDER_VERSION}-linux-x64.tar.xz" -O /tmp/blender.tar.xz \
     && mkdir -p /opt/blender \
     && tar -xf /tmp/blender.tar.xz -C /opt/blender --strip-components=1 \
     && rm /tmp/blender.tar.xz

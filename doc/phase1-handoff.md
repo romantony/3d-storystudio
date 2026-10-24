@@ -47,7 +47,7 @@ Everything here lives in `3d-storystudio` and is live/verified as of
 | Asset | What it is | Where |
 |---|---|---|
 | Object generation | Hunyuan3D 2.1 primary, TRELLIS.2 fallback — decided by a 25-image bake-off (geometry/texture tied 4.38/5 both; Hunyuan3D won on latency, ~2x faster at the median, and license fits current target markets) | RunPod endpoint `i703r1118k06ot` (Hunyuan3D), `rr133cjx94lkwt` (TRELLIS.2) |
-| Reference render | Headless Blender 4.5 LTS, Cycles (OptiX), produces RGB/depth/normal/object_id/alpha | RunPod endpoint `5cr41g9wtojd1t` |
+| Reference render | Headless Blender 5.2 LTS, Cycles (OptiX), produces RGB/depth/normal/object_id/alpha | RunPod endpoint `5cr41g9wtojd1t` |
 | USD scene composition | `compose_usda()` / `parse_usda()` — one Xform prim per scene node (translate/orient/scale ops + a custom `storystudio:assetUrl` reference attribute) under a `/World` default prim. Verified end-to-end: local round-trip against real fixture data, then a live 6-camera render through the actual RunPod endpoint | `runpod-3d-render-worker/src/scene_usd.py` |
 | Golden scene fixture | 11-node (env + 10 movable, AC-02-sized) / 6-camera regression scene proving zero-asset-regeneration multi-shot reuse, exercised through both flat-JSON and USD input paths | `fixtures/3d/golden-scene/` |
 | Render wire contract | Exact request/response JSON shape both workers accept — reuse verbatim in the Step Functions Lambda handlers rather than re-deriving it | see `runpod-3d-render-worker/README.md` and the render worker's `src/handler.py` |

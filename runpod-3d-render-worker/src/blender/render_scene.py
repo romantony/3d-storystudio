@@ -192,7 +192,7 @@ def configure_engine(engine, samples, seed=0):
         # not wall-clock/PID-derived, so this is sufficient on its own.
         scene.cycles.seed = seed
     else:
-        # BLENDER_EEVEE_NEXT — opt-in only, verify NVIDIA_DRIVER_CAPABILITIES
+        # BLENDER_EEVEE (the 4.x BLENDER_EEVEE_NEXT, renamed in 5.0) — opt-in only, verify NVIDIA_DRIVER_CAPABILITIES
         # and libegl1/libgl1 work on the target GPU/driver before relying on it.
         scene.eevee.taa_render_samples = samples
 
@@ -205,18 +205,27 @@ def setup_passes(passes, out_dir):
     vl.use_pass_object_index = "object_id" in passes
     vl.use_pass_combined = True
 
-    scene.use_nodes = True
-    tree = scene.node_tree
-    tree.nodes.clear()
+    # Blender 5.x: Scene.node_tree/CompositorNodeComposite are gone -- the
+    # compositor tree is a regular node group assigned to
+    # Scene.compositing_node_group, with a Group Output in place of Composite;
+    # CompositorNodeOutputFile takes directory/file_name plus per-item sockets.
+    tree = bpy.data.node_groups.new("StoryStudioCompositor", "CompositorNodeTree")
+    scene.compositing_node_group = tree
     rl = tree.nodes.new("CompositorNodeRLayers")
 
-    composite = tree.nodes.new("CompositorNodeComposite")
-    tree.links.new(rl.outputs["Image"], composite.inputs["Image"])
+    tree.interface.new_socket("Image", in_out='OUTPUT', socket_type='NodeSocketColor')
+    group_out = tree.nodes.new("NodeGroupOutput")
+    tree.links.new(rl.outputs["Image"], group_out.inputs["Image"])
 
     def file_output(socket_name, filename_prefix, file_format, color_depth=None):
         node = tree.nodes.new("CompositorNodeOutputFile")
-        node.base_path = str(out_dir)
-        node.file_slots[0].path = filename_prefix
+        node.directory = str(out_dir)
+        node.file_name = filename_prefix
+        item_type = 'RGBA' if socket_name in ("Image", "Alpha") else 'VECTOR' if socket_name == "Normal" else 'FLOAT'
+        node.file_output_items.new(item_type, "")
+        # node.format defaults to a multilayer EXR; media_type must be IMAGE
+        # before PNG/OPEN_EXR single-image formats become selectable
+        node.format.media_type = 'IMAGE'
         node.format.file_format = file_format
         if color_depth:
             node.format.color_depth = color_depth
@@ -230,10 +239,10 @@ def setup_passes(passes, out_dir):
     if "normal" in passes:
         file_output("Normal", "normal_", 'OPEN_EXR')
     if "object_id" in passes:
-        file_output("IndexOB", "object_id_", 'PNG', '16')
+        file_output("Object Index", "object_id_", 'PNG', '16')
 
 
-def check_has_subject():
+def check_has_subject(out_dir: Path):
     """Spec §20.3 render QC: 'RGB image is non-empty and camera sees at
     least one expected subject' -- exit code 0 / a written rgb.png alone
     doesn't prove that (see Part 2.4 bug 3 in doc/phase1-handoff.md: exit
@@ -245,7 +254,15 @@ def check_has_subject():
     inspect (never treated as a failure -- see caller)."""
     img = bpy.data.images.get("Render Result")
     if img is None or not img.pixels:
-        return None
+        # Blender 5.x leaves Render Result empty after a background render
+        # (compositor output goes to the File Output nodes) -- read the
+        # rgb PNG that node just wrote instead; same alpha-coverage test.
+        written = sorted(out_dir.glob("rgb*.png"))
+        if not written:
+            return None
+        img = bpy.data.images.load(str(written[0]))
+        if not img.pixels:
+            return None
     import array
     n = len(img.pixels)
     buf = array.array('f', bytes(4 * n))
@@ -285,7 +302,7 @@ def main():
 
     bpy.ops.render.render(write_still=True)
 
-    has_subject = check_has_subject()
+    has_subject = check_has_subject(out_dir)
 
     normalize_output_filenames(out_dir)
     # masks.json label contract (doc/phase1-handoff.md / README): one entry

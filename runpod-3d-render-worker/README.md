@@ -1,6 +1,6 @@
 # blender-render — headless scene compile + reference render
 
-One RunPod Serverless image: Blender 4.5 LTS, headless, GPU-accelerated
+One RunPod Serverless image: Blender 5.2 LTS, headless, GPU-accelerated
 Cycles. Implements Appendix B's Definition of Done directly — accepts scene
 JSON + GLB assets + camera JSON, produces RGB/depth/normal/object_id/alpha
 passes plus a manifest.
@@ -18,7 +18,7 @@ competitive with Eevee for a *structural* reference render, which is all
 the MVP needs (§11.2's "Beauty"/Cycles-path-tracing tier is explicitly
 deferred, but nothing stops using Cycles at reference quality *now*).
 
-`BLENDER_EEVEE_NEXT` is still wired up behind `rendererEngine` /
+`BLENDER_EEVEE` is still wired up behind `rendererEngine` /
 `RENDER_ENGINE` for a team that verifies it on their specific GPU/driver
 combo — just don't make it the default without that verification.
 
