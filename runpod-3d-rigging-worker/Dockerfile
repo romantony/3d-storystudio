@@ -104,6 +104,11 @@ RUN python download.py --model
 # Worker glue -- not part of upstream SkinTokens.
 RUN pip install --no-cache-dir runpod boto3
 
+# src/rig_package/info/asset.py imports scipy, but upstream's requirements.txt
+# doesn't list it -- it only arrived transitively, and an unpinned rebuild
+# dropped it (workers crashed on import). Install it explicitly.
+RUN pip install --no-cache-dir scipy
+
 # Dedicated Python 3.13 env for bpy_server.py only (placed after the heavy
 # torch/flash-attn/weights layers so editing it doesn't bust their build cache). bpy 5.1+ ships cp313
 # wheels only, and this image's main env is pinned to Python 3.11 by
