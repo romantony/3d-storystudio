@@ -22,8 +22,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
+    # HF_HOME only: transformers' legacy TRANSFORMERS_CACHE would point it at
+    # hf-cache/ while huggingface_hub (download_model.py) writes to hf-cache/hub/,
+    # so the worker would miss the pre-warmed weights and re-download ~16GB.
     HF_HOME=/workspace/hf-cache \
-    TRANSFORMERS_CACHE=/workspace/hf-cache \
     HY_MOTION_CKPTS=/workspace/models/hy-motion \
     USE_HF_MODELS=1
 

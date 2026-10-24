@@ -29,7 +29,6 @@ from pathlib import Path
 # these as Dockerfile ENV), this would otherwise silently land in
 # ~/.cache on the Pod's container disk and be lost on stop.
 os.environ.setdefault("HF_HOME", "/workspace/hf-cache")
-os.environ.setdefault("TRANSFORMERS_CACHE", "/workspace/hf-cache")
 
 subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "huggingface_hub"])
 
