@@ -19,7 +19,7 @@ card. Not yet verified on a live endpoint.
 
 ## Weights
 
-Not baked in (~20GB). Pre-warm the network volume from a Pod:
+Not baked in (~22GB: DiT 4.2GB, Qwen3-8B 16.4GB, CLIP 1.7GB). Pre-warm the network volume from a Pod:
 `python scripts/download_model.py [--variant HY-Motion-1.0-Lite]`.
 Otherwise the DiT downloads on first job and Qwen3-8B / CLIP via HF cache
 (`USE_HF_MODELS=1`, `HF_HOME=/workspace/hf-cache`).
