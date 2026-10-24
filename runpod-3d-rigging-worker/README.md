@@ -26,7 +26,23 @@ Same reasoning as `runpod-3d-asset-worker/README.md`'s "Why two images
 instead of one": torch 2.7.0/cu128 + its own flash-attn build + `bpy>=4.2`
 is a different, incompatible pinned toolchain from TRELLIS.2 (torch
 2.6.0/cu124), Hunyuan3D (torch 2.5.1/cu124), and the Blender render worker
-(real Blender 4.5, not the `bpy` pip package).
+(Blender 5.2 LTS as a binary, not the `bpy` pip package).
+
+## bpy version (dedicated Python 3.13 env)
+
+SkinTokens does all glTF import/export/skin-transfer through a background
+`bpy_server.py` subprocess over localhost HTTP. The main env is Python 3.11
+(pinned by torch 2.7.0 / flash-attn), where `bpy>=4.2` can only resolve to
+5.0.1 -- bpy 5.1+ ships cp313 wheels only. So the Dockerfile builds a second
+conda env (`bpy313`: Python 3.13, `bpy==5.2.3`, numpy/scipy/trimesh, CPU
+torch for the `torch.save` wire format) and `handler.py` launches
+`src/bpy_server_py313.py` with it when `BPY_SERVER_PYTHON` is set (it is, in
+the image); unset falls back to upstream's `start_bpy_server()`.
+`provenance.exporter` reports the exporter string from the output GLB, so a
+live job shows which bpy build actually ran.
+
+Upstream quirk, unrelated to the bpy version: `bpy_server` segfaults on input
+meshes under 990 vertices (`vertex_groups[...].remove(range(990))`).
 
 ## GPU / volume
 
@@ -66,6 +82,7 @@ POST /run
  "anchors": {"head": "...", "left_hand": "...", "root": "..."},
  "provenance": {"provider": "skintokens",
                 "modelVersion": "TokenRig-articulation_xl_quantization_256_token_4",
+                "exporter": "Khronos glTF Blender I/O v5.2.x",
                 "genTimeS": 14.2}}
 ```
 

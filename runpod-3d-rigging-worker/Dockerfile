@@ -63,6 +63,28 @@ ENV PATH="/workspace/miniconda3/envs/skintokens/bin:${PATH}"
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
+# Dedicated Python 3.13 env for bpy_server.py only. bpy 5.1+ ships cp313
+# wheels only, and this image's main env is pinned to Python 3.11 by
+# torch 2.7.0 / flash-attn, so `bpy>=4.2` in SkinTokens' requirements.txt
+# resolved to 5.0.1 (the newest cp311 wheel; confirmed from a live job's GLB
+# exporter string, "Khronos glTF Blender I/O v5.0.21"). demo.start_bpy_server()
+# already runs bpy as a separate subprocess over localhost HTTP, so just
+# launch it with this interpreter instead (handler.py reads BPY_SERVER_PYTHON;
+# src/bpy_server_py313.py explains why CPU torch is here and the TokenRig
+# model code is not). Pinned, not floated: output GLBs record the exporter
+# version, same reproducibility reasoning as the render worker's Blender pin.
+# Verified locally on CPU: SkinTokens' own load/export/transfer round-trip
+# through the real HTTP protocol with a py3.11/numpy-1.26 client against this
+# env (bpy 5.2.3, py3.13, numpy 2.5).
+ARG BPY_SERVER_BPY_VERSION=5.2.3
+RUN conda create -y -n bpy313 python=3.13 \
+    && /workspace/miniconda3/envs/bpy313/bin/pip install --no-cache-dir \
+        bpy==${BPY_SERVER_BPY_VERSION} numpy scipy trimesh bottle tornado requests \
+    && /workspace/miniconda3/envs/bpy313/bin/pip install --no-cache-dir \
+        torch==2.7.0+cpu --index-url https://download.pytorch.org/whl/cpu \
+        --extra-index-url https://pypi.org/simple
+ENV BPY_SERVER_PYTHON=/workspace/miniconda3/envs/bpy313/bin/python
+
 # Pinned to SkinTokens' documented combo (torch 2.7.0 / cu128). Do not
 # float this -- flash-attn below is compiled against this exact ABI.
 RUN pip install --no-cache-dir \
@@ -110,5 +132,6 @@ RUN pip install --no-cache-dir runpod boto3
 # needs demo.py on sys.path -- same constraint already solved for trellis2/
 # hunyuan3d's handler.py placement in their own Dockerfiles.
 COPY src/handler.py /workspace/SkinTokens/handler.py
+COPY src/bpy_server_py313.py /workspace/SkinTokens/bpy_server_py313.py
 
 CMD ["python", "-u", "handler.py"]

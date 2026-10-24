@@ -7,12 +7,15 @@ of parsed subprocess output.
 Runs from /workspace/SkinTokens (see Dockerfile) so demo.py's relative
 paths (experiments/.../grpo_1400.ckpt, bpy_server.py) resolve correctly.
 """
+import atexit
 import hashlib
 import io
 import json
 import logging
 import os
+import signal
 import struct
+import subprocess
 import sys
 import tempfile
 import threading
@@ -47,6 +50,26 @@ _bpy_server_lock = threading.Lock()
 _r2 = None
 
 
+def start_bpy_server_dedicated(python: str):
+    """Same launch as demo.start_bpy_server() (own process group, SIGTERM on
+    exit) but under a different interpreter: the bpy 5.2.3 / Python 3.13 env
+    built in the Dockerfile (bpy 5.1+ has no cp311 wheel, and this image's
+    main env is pinned to 3.11 by torch/flash-attn). Wire protocol and port
+    are unchanged, so demo.py / datapath.py keep talking to it as before."""
+    proc = subprocess.Popen([python, "-u", "bpy_server_py313.py"], preexec_fn=os.setsid)
+    LOGGER.info("bpy_server_py313.py started (pid=%s, python=%s)", proc.pid, python)
+
+    def cleanup():
+        if proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+    atexit.register(cleanup)
+    return proc
+
+
 def ensure_bpy_server() -> None:
     """demo.py's run_rig() talks to a background bpy_server.py subprocess
     over localhost HTTP for the actual glTF import/export/skin-transfer
@@ -56,7 +79,9 @@ def ensure_bpy_server() -> None:
     global _bpy_server_proc
     with _bpy_server_lock:
         if _bpy_server_proc is None or _bpy_server_proc.poll() is not None:
-            _bpy_server_proc = start_bpy_server()
+            dedicated_python = os.environ.get("BPY_SERVER_PYTHON")
+            _bpy_server_proc = (start_bpy_server_dedicated(dedicated_python) if dedicated_python
+                                else start_bpy_server())
             wait_for_bpy_server(timeout=60)
 
 
@@ -396,6 +421,9 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             "provenance": {
                 "provider": "skintokens",
                 "modelVersion": "TokenRig-articulation_xl_quantization_256_token_4",
+                # glTF exporter string from the output GLB, e.g. "Khronos glTF
+                # Blender I/O v5.2.x" -- records which bpy build wrote it
+                "exporter": (gltf.get("asset") or {}).get("generator"),
                 "genTimeS": gen_time_s,
             },
         }
