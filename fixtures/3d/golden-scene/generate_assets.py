@@ -10,13 +10,25 @@ ground-contact point (footprint center at z=0), per the canonical origin
 policy in spec §7.2 — scene.json can then place grounded props with
 translation.z == 0.
 
-    python3 -m venv .venv && .venv/bin/pip install trimesh numpy
+    python3 -m venv .venv && .venv/bin/pip install trimesh numpy scipy
     .venv/bin/python3 generate_assets.py
 """
 import numpy as np
 import trimesh
 
 OUT = "assets"
+
+# Meshes below are authored Z-up (ground at z=0, per spec §7.2), but glTF is
+# Y-up by spec and Blender's importer converts (x, y, z) -> (x, -z, y). Without
+# this rotation the GLBs import 90deg off (ground plane standing on its edge,
+# props half-buried and centered on z=0). (x, y, z) -> (x, z, -y) is the exact
+# inverse, so a Z-up scene round-trips through the importer unchanged.
+ZUP_TO_YUP = np.array([
+    [1, 0, 0, 0],
+    [0, 0, 1, 0],
+    [0, -1, 0, 0],
+    [0, 0, 0, 1],
+], dtype=float)
 
 
 def ground_to_zero(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
@@ -65,9 +77,9 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     for name, build in ASSETS.items():
         mesh = build()
+        b = mesh.bounds  # Z-up bounds, reported before the glTF axis rotation
         path = f"{OUT}/{name}.glb"
-        mesh.export(path, file_type="glb")
-        b = mesh.bounds
+        mesh.apply_transform(ZUP_TO_YUP).export(path, file_type="glb")
         print(f"{name:22s} bounds z=[{b[0][2]:.3f},{b[1][2]:.3f}]  -> {path}")
 
 
